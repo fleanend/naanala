@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Your space to practice some Navajo features.">
+  <title>Náánáłaʼ · Learn Navajo</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="./tests/SyllablePitch.js" defer></script>
+  <script src="./tests/Tests.js" defer></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header>
+    <a class="brand" href="#/">Náánáłaʼ<span>Learn Navajo</span></a>
+    <nav aria-label="Main navigation">
+      <a href="#/" data-page="home">Home</a>
+      <a href="#/tests" data-page="tests">Tests</a>
+      <a href="#/settings" data-page="settings">Settings</a>
+    </nav>
+    <button id="account" class="secondary">Sign in</button>
+  </header>
+  <main id="main" tabindex="-1"></main>
+  <footer>A space for learning Navajo. One step at a time.</footer>
+  <dialog id="login">
+    <form id="login-form">
+      <p class="eyebrow">Welcome</p>
+      <h2>Your learning space</h2>
+      <p>Create or return to a profile on this browser. No password needed.</p>
+      <label for="login-name">Display name</label>
+      <input id="login-name" name="name" autocomplete="nickname" required maxlength="60">
+      <p id="login-error" role="alert"></p>
+      <div class="actions"><button type="button" id="cancel-login" class="secondary">Cancel</button><button type="submit">Continue locally</button></div>
+    </form>
+  </dialog>
+  <p id="status" role="status" aria-live="polite"></p>
+</body>
+</html>

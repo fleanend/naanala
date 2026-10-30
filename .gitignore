@@ -11,3 +11,6 @@ node_modules
 Public/generated
 Resources/Files
 Resources/Temp
+.venv/
+__pycache__/
+*.pyc
