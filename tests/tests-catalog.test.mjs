@@ -7,6 +7,11 @@ const source = await readFile(new URL('../web/tests/Tests.js', import.meta.url),
 function load(path, user) {
   const nodes = new Map();
   const root = { innerHTML: '', querySelectorAll(selector) {
+    if (selector === '[data-pitch-profile]') return ['monophthongs', 'diphthongs_long_vowels', 'triphthongs_diphthongs_with_long_vowels', 'flat', 'rising', 'descending'].map(profile => {
+      const node = this.querySelector(`[data-pitch-profile="${profile}"]`);
+      node.dataset = { pitchProfile: profile };
+      return node;
+    });
     if (selector === '[data-preference]') return ['pauseAfterCorrect', 'pauseAfterIncorrect', 'showPitchGraph', 'playAudioInline'].map(key => {
       const node = this.querySelector(`[data-preference="${key}"]`);
       node.dataset = { preference: key };
@@ -19,6 +24,7 @@ function load(path, user) {
   } };
   let saved = 0;
   class SyllablePitch {
+    static bindReviewMedia() { return () => {}; }
     static review() { return '<p>Answer review fixture</p>'; }
     constructor(_, options) { this.options = options; }
     start() { this.started = true; }
@@ -29,6 +35,70 @@ function load(path, user) {
   });
   return { instance, root, saved: () => saved };
 }
+
+test('pitch profiles default on, save immediately per user, and reach the session', () => {
+  const user = {};
+  const app = load('/tests/syllable-pitch', user);
+  assert.equal(app.instance.pitchProfiles.length, 6);
+  assert.match(app.root.innerHTML, /data-pitch-profile="monophthongs"/);
+  const old = load('/tests/syllable-pitch', { exerciseSettings: { 'syllable-pitch': { profiles: [] } } });
+  assert.equal(old.instance.pitchProfiles.includes('monophthongs'), false);
+  const checkbox = app.root.querySelector('[data-pitch-profile="rising"]');
+  checkbox.checked = false;
+  checkbox.listeners.change();
+  assert.equal(app.saved(), 1);
+  assert.equal(user.exerciseSettings['syllable-pitch'].profiles.includes('rising'), false);
+  const reopened = load('/tests/syllable-pitch', JSON.parse(JSON.stringify(user)));
+  reopened.root.querySelector('#session-count').value = '2';
+  reopened.root.querySelector('#session-settings').listeners.submit({ preventDefault() {} });
+  assert.equal(reopened.instance.session.options.profiles.includes('rising'), false);
+  assert.equal(user.exerciseSettings['syllable-pitch'].profiles.length, 5);
+  assert.equal(load('/tests/syllable-pitch', {}).instance.pitchProfiles.length, 6);
+  assert.ok(app.root.innerHTML.indexOf('form="session-settings"') > app.root.innerHTML.indexOf('data-pitch-profile="descending"'));
+});
+
+test('start requires at least two pitch directions and one vowel category for all combinations', () => {
+  const categories = ['monophthongs', 'diphthongs_long_vowels', 'triphthongs_diphthongs_with_long_vowels', 'flat', 'rising', 'descending'];
+  for (let mask = 0; mask < 64; mask++) {
+    const profiles = categories.filter((_, i) => mask & (1 << i));
+    const app = load('/tests/syllable-pitch', { exerciseSettings: { 'syllable-pitch': { profiles } } });
+    const effective = profiles.filter(profile => profile !== 'monophthongs' || profiles.includes('flat'));
+    const valid = effective.some(profile => categories.slice(0, 3).includes(profile)) && effective.filter(profile => categories.slice(3).includes(profile)).length >= 2;
+    assert.equal(app.root.querySelector('[data-start-session]').disabled, !valid, String(mask));
+    app.root.querySelector('#session-count').value = '2';
+    app.root.querySelector('#session-settings').listeners.submit({ preventDefault() {} });
+    assert.equal(!!app.instance.session, valid, String(mask));
+  }
+  const app = load('/tests/syllable-pitch');
+  for (const profile of ['flat', 'rising']) {
+    const input = app.root.querySelector(`[data-pitch-profile="${profile}"]`);
+    input.checked = false;
+    input.listeners.change();
+  }
+  assert.equal(app.root.querySelector('[data-start-session]').disabled, true);
+  const input = app.root.querySelector('[data-pitch-profile="flat"]');
+  input.checked = true;
+  input.listeners.change();
+  assert.equal(app.root.querySelector('[data-start-session]').disabled, false);
+});
+
+test('disabling flat turns off monophthongs, saves the result, and locks its checkbox', () => {
+  const user = {};
+  const app = load('/tests/syllable-pitch', user);
+  const flat = app.root.querySelector('[data-pitch-profile="flat"]');
+  const mono = app.root.querySelector('[data-pitch-profile="monophthongs"]');
+  flat.checked = false;
+  flat.listeners.change();
+  assert.equal(mono.checked, false);
+  assert.equal(mono.disabled, true);
+  assert.equal(user.exerciseSettings['syllable-pitch'].profiles.includes('monophthongs'), false);
+  const reopened = load('/tests/syllable-pitch', JSON.parse(JSON.stringify(user)));
+  assert.equal(reopened.root.querySelector('[data-pitch-profile="monophthongs"]').disabled, true);
+  flat.checked = true;
+  flat.listeners.change();
+  assert.equal(mono.disabled, false);
+  assert.equal(mono.checked, false);
+});
 
 test('catalog groups linked exercise tiles by category', () => {
   const { root } = load('/tests');
@@ -80,7 +150,7 @@ test('general preferences save immediately and are passed to sessions even when 
   reopened.instance.startSession({ tracked: false, limit: 10 });
   assert.equal(reopened.instance.session.options.preferences.pauseAfterCorrect, true);
   assert.equal(user.testSessions, undefined);
-  assert.match(reopened.root.innerHTML, /<h2>Test settings<\/h2><\/section>/);
+  assert.ok(reopened.instance.session.options.profiles.includes('rising'));
 });
 
 test('history paginates, filters, and preserves answer details with older records', () => {

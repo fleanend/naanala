@@ -2,17 +2,25 @@
 const exercises = [
   { id: 'syllable-pitch', category: 'Pitch', name: 'Syllable Pitch',
     description: 'Listen to a syllable and identify its pitch.',
-    details: 'Listen to the prompt, then choose the matching pitch. After answering, review the correct answer and replay the sound. Pause preferences control whether you continue manually or move straight to the next question. The current demo uses synthetic low and high tones rather than Navajo recordings.',
+    details: 'Listen to the recording and choose a pitch contour for each syllable. H means high and L means low. Check your answer to see which syllables were correct. The whole question counts as correct only when every syllable is correct. After answering, review can show the estimated pitch frequency in Hz and the expected pitch contours.',
     create: (root, options) => new SyllablePitch(root, options) }
 ];
 
 class Tests {
+  static pitchProfiles = ['monophthongs', 'diphthongs_long_vowels', 'triphthongs_diphthongs_with_long_vowels', 'flat', 'rising', 'descending'];
+  static profileLabels = {
+    monophthongs: 'Monophthongs',
+    diphthongs_long_vowels: 'Diphthongs / long vowels',
+    triphthongs_diphthongs_with_long_vowels: 'Triphthongs / diphthongs with long vowels',
+    flat: 'Flat', rising: 'Rising', descending: 'Descending'
+  };
   constructor(root, { path, user, persist, signIn }) {
     this.root = root;
     this.user = user;
     this.persist = persist;
     this.signIn = signIn;
     this.preferences = { pauseAfterCorrect: false, pauseAfterIncorrect: true, showPitchGraph: true, playAudioInline: true };
+    this.pitchProfiles = [...Tests.pitchProfiles];
     for (const key of Object.keys(this.preferences)) {
       if (typeof user?.testPreferences?.[key] === 'boolean') this.preferences[key] = user.testPreferences[key];
     }
@@ -21,6 +29,10 @@ class Tests {
     this.text = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
     const [, , id, action] = path.split('/');
     this.exercise = exercises.find(item => item.id === id);
+    const savedProfiles = user?.exerciseSettings?.[id]?.profiles;
+    if (Array.isArray(savedProfiles) && savedProfiles.every(profile => Tests.pitchProfiles.includes(profile))) {
+      this.pitchProfiles = Tests.pitchProfiles.filter(profile => savedProfiles.includes(profile));
+    }
     if (!id) this.catalog();
     else if (!this.exercise || (action && action !== 'history')) root.innerHTML = '<h1>Exercise not found</h1><a href="#/tests">Back to tests</a>';
     else if (action === 'history') this.history();
@@ -68,14 +80,44 @@ class Tests {
         <label for="session-mode">Session length</label><select id="session-mode"><option value="limited">Limited</option><option value="unlimited">Unlimited</option></select>
         <div id="question-count"><label for="session-count">Number of questions</label><input id="session-count" type="number" min="1" max="1000" step="1" required value="${Number.isInteger(options.count) ? options.count : 20}"></div>
         <p id="session-description" aria-live="polite"></p>
-        <p>This exercise currently uses dummy low/high tones to test the session flow. These are synthetic sounds, not Navajo recordings.</p>
-        <button type="submit">Start session</button>
+        <p>One question is one recording. Choose a contour for every syllable, then check your answer. All syllables must be right for the question to count as correct.</p>
       </form></section>
       <section class="preferences panel"><h2>Preferences</h2><p>General preferences saved to your ${this.user ? 'local account in this browser.' : 'current visit. Sign in to save them to your account.'}</p>
       ${Object.entries({ pauseAfterCorrect: 'Pause After Correct Answers', pauseAfterIncorrect: 'Pause After Incorrect Answers', showPitchGraph: 'Show Pitch Graph During Review', playAudioInline: 'Play Audio Inline' }).map(([key, label]) => `<label class="checkbox"><input type="checkbox" data-preference="${key}" ${this.preferences[key] ? 'checked' : ''}>${label}</label>`).join('')}
-      <p id="preference-status" role="status"></p></section></div>
-      <section class="test-settings panel"><h2>Test settings</h2></section>`;
+      <p id="preference-status" role="status"></p></section>
+      <section class="test-settings panel"><h2>Test settings</h2><p>Vowel and pitch categories</p>
+      ${Tests.pitchProfiles.map(profile => `<label class="checkbox"><input type="checkbox" data-pitch-profile="${profile}" ${this.pitchProfiles.includes(profile) ? 'checked' : ''}>${Tests.profileLabels[profile]}</label>`).join('')}
+      <p data-profile-status role="status"></p></section></div>
+      <div class="actions"><button data-start-session type="submit" form="session-settings" aria-describedby="category-validation">Start session</button></div>
+      <p id="category-validation" role="status"></p>`;
     const query = selector => this.root.querySelector(selector);
+    const validCategories = () =>
+      ['flat', 'rising', 'descending'].filter(profile => this.pitchProfiles.includes(profile)).length >= 2 &&
+      ['monophthongs', 'diphthongs_long_vowels', 'triphthongs_diphthongs_with_long_vowels'].some(profile => this.pitchProfiles.includes(profile));
+    const updateStart = () => {
+      const flatEnabled = this.pitchProfiles.includes('flat');
+      if (!flatEnabled) this.pitchProfiles = this.pitchProfiles.filter(profile => profile !== 'monophthongs');
+      const monophthongs = query('[data-pitch-profile="monophthongs"]');
+      monophthongs.disabled = !flatEnabled;
+      monophthongs.checked = this.pitchProfiles.includes('monophthongs');
+      const valid = validCategories();
+      query('[data-start-session]').disabled = !valid;
+      query('#category-validation').textContent = valid ? '' : 'Select at least one vowel category and at least two of Flat, Rising, and Descending.';
+    };
+    updateStart();
+    this.root.querySelectorAll('[data-pitch-profile]').forEach(input => input.addEventListener('change', () => {
+      const selected = new Set(this.pitchProfiles);
+      if (input.checked) selected.add(input.dataset.pitchProfile);
+      else selected.delete(input.dataset.pitchProfile);
+      this.pitchProfiles = Tests.pitchProfiles.filter(profile => selected.has(profile));
+      updateStart();
+      if (this.user) {
+        this.user.exerciseSettings ||= {};
+        this.user.exerciseSettings[exercise.id] = { ...options, ...this.user.exerciseSettings[exercise.id], profiles: [...this.pitchProfiles] };
+        const saved = this.persist();
+        query('[data-profile-status]').textContent = saved === false ? 'Storage unavailable; settings apply for this visit.' : 'Test settings saved.';
+      }
+    }));
     this.root.querySelectorAll('[data-preference]').forEach(input => input.addEventListener('change', () => {
       this.preferences[input.dataset.preference] = input.checked;
       if (this.user) {
@@ -98,13 +140,14 @@ class Tests {
     describe();
     query('#session-settings').addEventListener('submit', event => {
       event.preventDefault();
+      if (!validCategories()) return;
       const mode = query('#session-mode').value;
       const count = Number(query('#session-count').value);
       if (mode === 'limited' && (!Number.isInteger(count) || count < 1 || count > 1000)) return;
       const tracked = !!this.user && query('#tracking').value === 'tracked';
       if (this.user) {
         this.user.exerciseSettings ||= {};
-        this.user.exerciseSettings[exercise.id] = { tracked, mode, count: Number.isInteger(count) ? count : 20 };
+        this.user.exerciseSettings[exercise.id] = { tracked, mode, count: Number.isInteger(count) ? count : 20, profiles: [...this.pitchProfiles] };
         this.persist();
       }
       this.startSession({ tracked, limit: mode === 'limited' ? count : null });
@@ -119,7 +162,7 @@ class Tests {
       this.persist();
     }
     this.session = this.exercise.create(this.root, {
-      limit, tracked, preferences: { ...this.preferences },
+      limit, tracked, profiles: [...this.pitchProfiles], preferences: { ...this.preferences },
       onProgress: ({ answered, correct, answer }) => {
         Object.assign(record, { answered, correct });
         if (answer) record.answers.push(answer);
@@ -172,6 +215,7 @@ class Tests {
   }
 
   renderHistory() {
+    this.cleanupReviewMedia?.();
     this.root.querySelectorAll('audio').forEach(audio => audio.pause());
     const target = this.root.querySelector('#test-history');
     const text = this.text;
@@ -212,9 +256,11 @@ class Tests {
       audio.src = button.dataset.replay;
       audio.play().catch(() => {});
     }));
+    this.cleanupReviewMedia = SyllablePitch.bindReviewMedia(this.root);
   }
 
   destroy() {
+    this.cleanupReviewMedia?.();
     this.session?.destroy();
     this.root.querySelectorAll('audio').forEach(audio => audio.pause());
   }
