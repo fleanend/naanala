@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 
-const source = await readFile(new URL('../web/tests/SyllablePitch.js', import.meta.url), 'utf8');
-const fixture = () => ({ syllables_no_pitch: ['man', 'gii'], tone_profile: ['L', 'HL'], options_profile: [['H', 'L'], ['HH', 'LL', 'LH', 'HL']], word: 'test word', audio_id: 'abc123' });
+const source = await readFile(new URL('../web/tests/Exercise.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('../web/tests/SyllablePitch.js', import.meta.url), 'utf8');
+const fixture = () => ({ example_id: 'row-1', syllables_no_pitch: ['man', 'gii'], tone_profile: ['L', 'HL'], options_profile: [['H', 'L'], ['HH', 'LL', 'LH', 'HL']], word: 'test word', audio_id: 'abc123' });
+const batch = exercise => ({ exercises: [exercise, { ...exercise, example_id: 'row-2' }, { ...exercise, example_id: 'row-3' }] });
+
 test('disabled syllables stay visible but require no answer and do not affect scoring or review', async () => {
   const exercise = { ...fixture(), tone_profile: ['P', 'HL'], original_tone_profile: ['L', 'HL'], options_profile: [[], ['LH', 'HL']] };
-  const { ui, root } = create({ limit: 1 }, { fetch: async () => ({ ok: true, json: async () => exercise }) });
+  const { ui, root } = create({ limit: 1 }, { fetch: async () => ({ ok: true, json: async () => batch(exercise) }) });
   await ui.start();
   assert.equal(ui.state.error, null);
   assert.match(root.innerHTML, /Correct contour: L/);
@@ -27,22 +29,22 @@ test('disabled syllables stay visible but require no answer and do not affect sc
   const validate = runInNewContext(`${source}\nSyllablePitch.validateExercise`, {});
   assert.throws(() => validate({ ...exercise, tone_profile: ['P', 'P'] }), /No enabled/);
 });
-test('exercise requests send every category as a boolean on every question', async () => {
+test('session requests send categories once and subsequent questions use the queue', async () => {
   const calls = [];
   const { ui } = create({ profiles: ['rising'] }, { fetch: async (url, options) => {
     calls.push({ url, options });
-    return { ok: true, json: async () => fixture() };
+    return { ok: true, json: async () => batch(fixture()) };
   } });
   await ui.start();
   await ui.load();
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 1);
   for (const { options } of calls) {
     assert.equal(options.method, 'POST');
     assert.equal(options.headers['Content-Type'], 'application/json');
     assert.deepEqual(JSON.parse(options.body), {
       monophthongs: false, diphthongs_long_vowels: false,
       triphthongs_diphthongs_with_long_vowels: false,
-      flat: false, rising: true, descending: false
+      flat: false, rising: true, descending: false, question_count: null
     });
   }
   ui.destroy();
@@ -87,7 +89,7 @@ test('curve extends to both recording edges without inventing pitch for an entir
 function create(options = {}, overrides = {}) {
   const root = { innerHTML: '', querySelector: () => null, querySelectorAll: () => [] };
   const ui = runInNewContext(`${source}\nnew SyllablePitch(root, options)`, {
-    root, options, AbortController, fetch: async () => ({ ok: true, json: async () => fixture() }), setTimeout, clearTimeout, ...overrides
+    root, options, AbortController, fetch: async () => ({ ok: true, json: async () => batch(fixture()) }), setTimeout, clearTimeout, ...overrides
   });
   return { ui, root };
 }
@@ -108,7 +110,7 @@ test('actual response validation checks all fields, matching counts and correct 
 
 test('loads one contour choice group per syllable, hides accented word until review, escapes labels', async () => {
   const exercise = { ...fixture(), syllables_no_pitch: ['<script>bad()</script>', 'gii'] };
-  const { ui, root } = create({}, { fetch: async () => ({ ok: true, json: async () => exercise }) });
+  const { ui, root } = create({}, { fetch: async () => ({ ok: true, json: async () => batch(exercise) }) });
   await ui.start();
   assert.match(root.innerHTML, /name="syllable-0"/);
   assert.match(root.innerHTML, /name="syllable-1"/);
@@ -162,7 +164,7 @@ test('correct and incorrect pause preferences control automatic advance independ
 test('review includes annotated contours and audio but hides the estimated frequency graph', async () => {
   const { ui } = create({ limit: 1 });
   await ui.start();
-  ui.state.pitchTrack = { duration: 1, points: [{time: .1, hz: 150}, {time: .2, hz: null}, {time: .3, hz: 180}] };
+  ui.state.recordingAnalysis = { duration: 1, points: [{time: .1, hz: 150}, {time: .2, hz: null}, {time: .3, hz: 180}] };
   ui.choose(0, 'L'); ui.choose(1, 'HL'); ui.submit();
   const review = runInNewContext(`${source}\nSyllablePitch.review`, {});
   const inline = review(ui.state.history[0], { showPitchGraph: true, playAudioInline: true });
@@ -170,8 +172,8 @@ test('review includes annotated contours and audio but hides the estimated frequ
   assert.doesNotMatch(inline, /Pitch frequency|data-frequency-chart/);
   assert.match(inline, /<audio controls/);
   const button = review(ui.state.history[0], { showPitchGraph: false, playAudioInline: false });
-  assert.doesNotMatch(button, /pitch contour|<audio controls/);
-  assert.match(button, /data-review-play/);
+  assert.doesNotMatch(button, /pitch contour|data-review-play/);
+  assert.match(button, /<audio controls/);
 });
 
 test('pitch decoding uses actual audio samples and closes its audio context', async () => {
@@ -184,13 +186,13 @@ test('pitch decoding uses actual audio samples and closes its audio context', as
     },
     fetch: async url => {
       requests.push(url);
-      return { ok: true, json: async () => fixture(), arrayBuffer: async () => new ArrayBuffer(4) };
+      return { ok: true, json: async () => batch(fixture()), arrayBuffer: async () => new ArrayBuffer(4) };
     }
   });
   await ui.start();
-  assert.deepEqual(requests, ['/api/tests/syllable-pitch/random', '/api/audio/abc123']);
-  assert.ok(ui.state.pitchTrack.points.filter(p => p.hz).every(p => Math.abs(p.hz - 200) < 3));
-  assert.ok(ui.state.pitchTrack.points.some(p => p.hz));
+  assert.deepEqual(requests, ['/api/tests/syllable-pitch/session', '/api/audio/abc123']);
+  assert.ok(ui.state.recordingAnalysis.points.filter(p => p.hz).every(p => Math.abs(p.hz - 200) < 3));
+  assert.ok(ui.state.recordingAnalysis.points.some(p => p.hz));
   assert.doesNotMatch(ui.root.innerHTML, /Pitch frequency/);
   ui.choose(0, 'L'); ui.choose(1, 'HL'); ui.submit();
   assert.doesNotMatch(ui.root.innerHTML, /Pitch frequency|data-frequency-chart/);
@@ -207,9 +209,9 @@ test('request failures offer retry and late responses cannot restart an ended se
   const { ui, root } = create({}, { fetch: () => new Promise(resolve => { respond = resolve; }) });
   const loading = ui.start();
   ui.finish('Ended');
-  respond({ ok: true, json: async () => fixture() });
+  respond({ ok: true, json: async () => batch(fixture()) });
   await loading;
-  assert.equal(ui.state.syllablePitch, null);
+  assert.equal(ui.state.exercise, null);
   assert.match(root.innerHTML, /Session ended/);
 });
 
@@ -297,3 +299,36 @@ test('quiet speech-like periodic audio is tracked while noise and pauses remain 
   assert.ok(noiseTrack.points.filter(point => point.hz !== null).length / noiseTrack.points.length < .05);
 });
 
+
+
+test('limited sessions cap at available rows and keep distinct rows of the same word', async () => {
+  let ready;
+  const { ui, root } = create({ limit: 20, onSessionReady: value => { ready = value.limit; }, preferences: { pauseAfterCorrect: true } });
+  await ui.start();
+  assert.equal(ready, 3);
+  assert.match(root.innerHTML, /Only 3 examples/);
+  for (let i = 0; i < 3; i++) {
+    assert.equal(ui.state.exercise.example_id, `row-${i + 1}`);
+    ui.choose(0, 'L'); ui.choose(1, 'HL'); ui.submit();
+    if (i < 2) await ui.load();
+  }
+  assert.equal(ui.finishStatus, 'Completed');
+  assert.equal(new Set(ui.state.history.map(item => item.example_id)).size, 3);
+});
+
+test('unlimited sessions exhaust the queue before requesting a new shuffled pass', async () => {
+  let calls = 0;
+  const { ui } = create({ preferences: { pauseAfterCorrect: true } }, { fetch: async () => {
+    calls++;
+    return { ok: true, json: async () => batch(fixture()) };
+  } });
+  await ui.start();
+  for (let i = 0; i < 3; i++) {
+    assert.equal(calls, 1);
+    ui.choose(0, 'L'); ui.choose(1, 'HL'); ui.submit();
+    await ui.load();
+  }
+  assert.equal(calls, 2);
+  assert.equal(ui.finished, false);
+  ui.destroy();
+});

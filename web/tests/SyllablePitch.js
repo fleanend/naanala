@@ -1,39 +1,25 @@
-// Syllable Pitch: one contour choice per syllable, one score per word.
-class SyllablePitch {
-  static text(value) {
-    return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
-  }
+// Pitch-specific API contract, categories, and visualizations.
+class SyllablePitch extends Exercise {
+  static title = 'Syllable Pitch';
+  static endpoint = '/api/tests/syllable-pitch/session';
+  static syllablesField = 'syllables_no_pitch';
+  static profileField = 'tone_profile';
+  static originalField = 'original_tone_profile';
+  static answerLabel = 'contour';
+  static instructions = 'Listen, then choose one contour for each syllable. H = high, L = low.';
+  static validChoice = value => /^[HL]+$/.test(value);
+  static choiceLabel = value => value;
+  static validateExercise = value => Exercise.validateExercise(value, SyllablePitch);
+  static review = (item, preferences) => Exercise.review(item, preferences, SyllablePitch);
+  static answerGraph = value => SyllablePitch.contourGraph(value);
 
-  static validateExercise(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected an exercise object.');
-    const strings = list => Array.isArray(list) && list.every(item => typeof item === 'string');
-    const fields = {
-      syllables_no_pitch: strings, tone_profile: strings,
-      options_profile: list => Array.isArray(list) && list.every(strings),
-      word: item => typeof item === 'string', audio_id: item => typeof item === 'string' && /^[a-zA-Z0-9_-]+$/.test(item)
-    };
-    const invalid = Object.keys(fields).filter(key => !fields[key](value[key]));
-    if (invalid.length) throw new Error(`Invalid or missing ${invalid.join(', ')} in PitchSyllableExercise.`);
-    const count = value.syllables_no_pitch.length;
-    if (!count || value.tone_profile.length !== count || value.options_profile.length !== count) throw new Error('Syllable, tone and option counts must match.');
-    value.options_profile.forEach((options, i) => {
-      if (value.tone_profile[i] === 'P') {
-        if (!options.every(tone => /^[HL]+$/.test(tone))) throw new Error(`Invalid contour options for syllable ${i + 1}.`);
-        return;
-      }
-      if (!options.length || !options.includes(value.tone_profile[i]) || !options.every(tone => /^[HL]+$/.test(tone)) || !/^[HL]+$/.test(value.tone_profile[i])) {
-        throw new Error(`Invalid contour options for syllable ${i + 1}.`);
-      }
-    });
-    if (value.tone_profile.every(tone => tone === 'P')) throw new Error('No enabled syllables in this exercise.');
-    const original = value.original_tone_profile;
-    if (original !== undefined && (!strings(original) || original.length !== count || !original.every(tone => /^[HL]+$/.test(tone)))) {
-      throw new Error('Invalid original tone profile.');
-    }
-    return { ...Object.fromEntries(Object.keys(fields).map(key => [key, value[key]])), ...(original ? { original_tone_profile: original } : {}) };
-  }
+  answerDetails() { return { pitchTrack: this.state.recordingAnalysis }; }
 
-  static audioUrl(id) { return `/api/audio/${encodeURIComponent(id)}`; }
+  sessionSettings() {
+    const categories = ['monophthongs', 'diphthongs_long_vowels', 'triphthongs_diphthongs_with_long_vowels', 'flat', 'rising', 'descending'];
+    const selected = this.options.profiles ?? categories;
+    return Object.fromEntries(categories.map(category => [category, selected.includes(category)]));
+  }
 
   // YIN-style fundamental-frequency estimation. Unvoiced frames remain gaps.
   static estimatePitch(buffer) {
@@ -189,136 +175,11 @@ class SyllablePitch {
     return `<figure class="recording-waveform frequency-player" data-frequency-duration="${track.duration}"><figcaption><strong>Pitch frequency</strong><span>Hz · smoothed estimated F0</span></figcaption><svg data-frequency-chart viewBox="0 0 640 180" role="img" aria-label="Estimated fundamental frequency in hertz over time">${[low, (low + high) / 2, high].map(hz => `<path d="M50 ${y(hz)} H620" stroke="currentColor" opacity=".15"/><text x="2" y="${y(hz) + 4}" fill="currentColor" font-size="12">${Math.round(hz)}</text>`).join('')}<rect data-played-region x="50" y="20" width="0" height="125" fill="currentColor" opacity=".07"/><path d="${path}" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><line data-playhead x1="50" x2="50" y1="20" y2="145" stroke="currentColor" stroke-width="2"/><text x="50" y="170" fill="currentColor" font-size="12">0 s</text><text x="620" y="170" text-anchor="end" fill="currentColor" font-size="12">${track.duration.toFixed(2)} s</text></svg><label class="frequency-seek-label">Seek recording<input data-frequency-seek type="range" min="0" max="${track.duration}" step="0.01" value="0"></label><output data-frequency-time>0.00 / ${track.duration.toFixed(2)} s</output><small>Click the graph to seek. The curve connects missing pitch sections, starts at the lower axis padding, and holds the final detected pitch.</small></figure>`;
   }
 
-  static bindReviewMedia(root) {
-    const cleanups = [];
-    root.querySelectorAll('[data-frequency-review]').forEach(review => {
-      const audio = review.querySelector('audio');
-      if (!audio) return;
-      const figure = review.querySelector('[data-frequency-duration]');
-      const chart = review.querySelector('[data-frequency-chart]');
-      const slider = review.querySelector('[data-frequency-seek]');
-      const cursor = review.querySelector('[data-playhead]');
-      const region = review.querySelector('[data-played-region]');
-      const output = review.querySelector('[data-frequency-time]');
-      const button = review.querySelector('[data-review-play]');
-      const duration = Number(figure?.dataset.frequencyDuration) || 0;
-      let frame = null;
-      const listen = (element, event, handler) => {
-        if (!element) return;
-        element.addEventListener(event, handler);
-        cleanups.push(() => element.removeEventListener(event, handler));
-      };
-      const update = () => {
-        const time = Math.max(0, Math.min(duration, audio.currentTime || 0));
-        const x = 50 + (duration ? time / duration : 0) * 570;
-        cursor?.setAttribute('x1', x);
-        cursor?.setAttribute('x2', x);
-        region?.setAttribute('width', x - 50);
-        if (slider) slider.value = String(time);
-        if (output) output.textContent = `${time.toFixed(2)} / ${duration.toFixed(2)} s`;
-        if (button) button.textContent = audio.paused ? 'Play recording' : 'Pause recording';
-      };
-      const cancel = () => {
-        if (frame !== null) globalThis.cancelAnimationFrame?.(frame);
-        frame = null;
-      };
-      const tick = () => {
-        update();
-        frame = !audio.paused && !audio.ended && globalThis.requestAnimationFrame ? requestAnimationFrame(tick) : null;
-      };
-      listen(audio, 'play', () => {
-        root.querySelectorAll('audio').forEach(other => { if (other !== audio) other.pause(); });
-        cancel(); tick();
-      });
-      for (const event of ['pause', 'ended']) listen(audio, event, () => { cancel(); update(); });
-      for (const event of ['timeupdate', 'seeking', 'seeked', 'loadedmetadata', 'ratechange']) listen(audio, event, update);
-      const seek = time => {
-        if (!Number.isFinite(audio.duration) || !duration) return;
-        audio.currentTime = Math.max(0, Math.min(audio.duration, time));
-        update();
-      };
-      listen(slider, 'input', () => seek(Number(slider.value)));
-      listen(chart, 'click', event => {
-        const bounds = chart.getBoundingClientRect();
-        if (bounds.width) seek(((event.clientX - bounds.left) / bounds.width * 640 - 50) / 570 * duration);
-      });
-      listen(button, 'click', () => {
-        if (audio.paused) {
-          if (audio.ended) audio.currentTime = 0;
-          audio.play().catch(() => { if (button) button.textContent = 'Playback unavailable — try again'; });
-        } else audio.pause();
-      });
-      cleanups.push(() => { cancel(); audio.pause(); });
-      update();
-    });
-    return () => cleanups.splice(0).forEach(cleanup => cleanup());
-  }
-
   static contourGraph(contour) {
     const samples = [...contour].map(tone => tone === 'H' ? 12 : 46);
     if (!samples.length) return '';
     const points = samples.length === 1 ? `8,${samples[0]} 152,${samples[0]}` : samples.map((height, i) => `${8 + i * 144 / (samples.length - 1)},${height}`).join(' ');
     return `<svg class="pitch-graph" viewBox="0 0 160 60" role="img" aria-label="${SyllablePitch.text(contour)} pitch contour"><polyline points="${points}" fill="none" stroke="currentColor" stroke-width="3"/></svg>`;
-  }
-
-  static review(item, preferences) {
-    const text = SyllablePitch.text;
-    // Keep summary records from the earlier dummy exercise readable.
-    const pair = item.pair || {};
-    const audio = item.audio_id ? SyllablePitch.audioUrl(item.audio_id) : pair.audio;
-    return `<div class="answer-review" data-frequency-review><strong>${item.correct ? 'Correct' : 'Incorrect'}</strong><p>${text(item.word || item.prompt || pair.label)}</p>
-      ${item.syllables ? item.syllables.map(syllable => syllable.skipped ? `<div class="syllable-result"><strong>${text(syllable.label)}: Skipped</strong><p>Correct contour: ${text(syllable.expected === 'P' ? 'Unavailable' : syllable.expected)}</p></div>` : `<div class="syllable-result ${syllable.correct ? 'result-correct' : 'result-incorrect'}"><strong>${text(syllable.label)}: ${syllable.correct ? 'Correct' : 'Incorrect'}</strong><p>Your contour: ${text(syllable.selected)} · Correct contour: ${text(syllable.expected)}</p>${preferences.showPitchGraph ? SyllablePitch.contourGraph(syllable.expected) : ''}</div>`).join('') : `<p>Your answer: ${text(item.selected?.label)} · Correct answer: ${text(pair.label)}</p>`}
-      ${audio ? `<audio ${preferences.playAudioInline ? 'controls' : 'hidden'} preload="metadata" src="${text(audio)}" aria-label="Replay recording"></audio>${preferences.playAudioInline ? '' : '<button class="secondary" data-review-play>Play recording</button>'}` : ''}
-      ${Number.isFinite(item.responseTimeMs) ? `<small>${(item.responseTimeMs / 1000).toFixed(1)} seconds</small>` : ''}</div>`;
-  }
-
-  constructor(root, options = {}) {
-    this.root = root;
-    this.options = options;
-    this.preferences = { pauseAfterCorrect: false, pauseAfterIncorrect: true, showPitchGraph: true, playAudioInline: true, ...options.preferences };
-    this.state = { started: false, syllablePitch: null, choices: [], submitted: false, history: [], loading: false, error: null };
-    this.finished = false;
-    this.render();
-  }
-
-  start() {
-    if (this.state.started) return;
-    this.state.started = true;
-    return this.load();
-  }
-
-  async load() {
-    if (this.finished) return;
-    clearTimeout(this.timer);
-    this.request?.abort();
-    this.stopAudio();
-    const request = new AbortController();
-    this.request = request;
-    Object.assign(this.state, { syllablePitch: null, choices: [], submitted: false, loading: true, error: null, pitchTrack: null });
-    this.render();
-    try {
-      const categories = ['monophthongs', 'diphthongs_long_vowels', 'triphthongs_diphthongs_with_long_vowels', 'flat', 'rising', 'descending'];
-      const selected = this.options.profiles ?? categories;
-      const response = await fetch('/api/tests/syllable-pitch/random', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.fromEntries(categories.map(category => [category, selected.includes(category)]))),
-        signal: request.signal
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const exercise = SyllablePitch.validateExercise(await response.json());
-      const pitchTrack = await this.decodeRecording(exercise.audio_id, request.signal);
-      if (request.signal.aborted || this.finished) return;
-      Object.assign(this.state, { syllablePitch: exercise, pitchTrack, choices: exercise.tone_profile.map(tone => tone === 'P' ? 'P' : null) });
-    } catch (error) {
-      if (request.signal.aborted || this.finished) return;
-      this.state.error = `Could not load the exercise. ${error.message} Retry after checking the backend.`;
-    }
-    if (request.signal.aborted || this.finished) return;
-    this.state.loading = false;
-    this.questionStartedAt = Date.now();
-    this.render();
-    const audio = this.root.querySelector('[data-question-audio]');
-    audio?.play().catch(() => {});
   }
 
   async decodeRecording(id, signal) {
@@ -337,86 +198,4 @@ class SyllablePitch {
     } finally { await context?.close(); }
   }
 
-  choose(index, value) {
-    const exercise = this.state.syllablePitch;
-    if (this.finished || this.state.submitted || exercise?.tone_profile[index] === 'P' || !exercise?.options_profile[index]?.includes(value)) return;
-    this.state.choices[index] = value;
-    const submit = this.root.querySelector('[data-submit]');
-    if (submit) submit.disabled = this.state.choices.some(choice => choice === null);
-  }
-
-  submit() {
-    const { syllablePitch: exercise, choices, history } = this.state;
-    if (this.finished || this.state.submitted || !exercise || choices.length !== exercise.tone_profile.length || choices.some((value, i) => exercise.tone_profile[i] !== 'P' && !exercise.options_profile[i].includes(value))) return;
-    const syllables = exercise.syllables_no_pitch.map((label, i) => ({ label, selected: choices[i], expected: exercise.tone_profile[i] === 'P' ? (exercise.original_tone_profile?.[i] || 'P') : exercise.tone_profile[i], skipped: exercise.tone_profile[i] === 'P', correct: choices[i] === exercise.tone_profile[i] }));
-    const correct = syllables.filter(syllable => !syllable.skipped).every(syllable => syllable.correct);
-    const answer = { correct, word: exercise.word, audio_id: exercise.audio_id, syllables, pitchTrack: this.state.pitchTrack,
-      type: `${syllables.length} syllable${syllables.length === 1 ? '' : 's'}`, pair: { label: exercise.word },
-      answeredAt: new Date().toISOString(), responseTimeMs: Date.now() - this.questionStartedAt };
-    history.unshift(answer);
-    this.state.submitted = true;
-    this.options.onProgress?.({ answered: history.length, correct: history.filter(item => item.correct).length, answer });
-    if (this.options.limit && history.length >= this.options.limit) return this.finish('Completed');
-    this.stopAudio();
-    this.render();
-    if (!(correct ? this.preferences.pauseAfterCorrect : this.preferences.pauseAfterIncorrect)) this.timer = setTimeout(() => this.load(), 1400);
-  }
-
-  render() {
-    this.cleanupReviewMedia?.();
-    const text = SyllablePitch.text;
-    const { started, syllablePitch: exercise, choices, submitted, history, loading, error } = this.state;
-    this.root.innerHTML = `<section aria-label="Syllable pitch test"><h1>Syllable Pitch</h1>
-      ${!started ? '<button data-start>Start</button>' : `<p>${this.options.tracked ? 'Tracked' : 'Untracked'} · ${history.length}${this.options.limit ? ` / ${this.options.limit}` : ''} questions answered · ${history.filter(item => item.correct).length} correct</p>`}
-      ${this.finished ? `<h2>Session ${this.finishStatus === 'Completed' ? 'complete' : 'ended'}</h2><button data-back>Back to exercise settings</button><h2>Answer review</h2>${history.slice().reverse().map(item => SyllablePitch.review(item, this.preferences)).join('')}` : started ? `
-        ${loading ? '<p role="status">Loading exercise…</p>' : ''}
-        ${error ? `<p role="alert">${text(error)}</p><button data-retry>Retry</button>` : ''}
-        ${exercise ? `<h2>${text(exercise.syllables_no_pitch.join(' · '))}</h2><p>Listen, then choose one contour for each syllable. H = high, L = low.</p>
-          <audio data-question-audio controls preload="auto" src="${SyllablePitch.audioUrl(exercise.audio_id)}" aria-label="Question recording"></audio><p data-audio-error role="status"></p>
-          <form data-answer-form><div class="syllable-choices">${exercise.syllables_no_pitch.map((syllable, i) => exercise.tone_profile[i] === 'P' ? `<div class="syllable-result"><strong>Syllable ${i + 1}: ${text(syllable)}</strong><p>Correct contour: ${text(exercise.original_tone_profile?.[i] || 'Unavailable')}</p></div>` : `<fieldset ${submitted ? 'disabled' : ''}><legend>Syllable ${i + 1}: ${text(syllable)}</legend>${exercise.options_profile[i].map(contour => `<label class="contour-choice"><input type="radio" name="syllable-${i}" data-syllable="${i}" value="${text(contour)}" ${choices[i] === contour ? 'checked' : ''} required>${text(contour)}</label>`).join('')}</fieldset>`).join('')}</div>
-          ${!submitted ? '<button data-submit type="submit" disabled>Check answer</button>' : ''}</form>
-          ${submitted ? `<div role="status">${SyllablePitch.review(history[0], this.preferences)}</div><button data-continue>Continue</button>` : ''}` : ''}
-        <div class="actions"><button data-end class="secondary">End session</button></div>
-        ${history.length ? `<details><summary>Answers this session (${history.length})</summary>${history.map(item => SyllablePitch.review(item, this.preferences)).join('')}</details>` : ''}` : ''}
-      <audio data-review-player hidden></audio></section>`;
-    const on = (selector, event, fn) => this.root.querySelector(selector)?.addEventListener(event, fn);
-    on('[data-start]', 'click', () => this.start());
-    on('[data-retry]', 'click', () => this.load());
-    on('[data-continue]', 'click', () => this.load());
-    on('[data-end]', 'click', () => this.finish('Ended'));
-    on('[data-back]', 'click', () => this.options.onBack?.());
-    on('[data-answer-form]', 'submit', event => { event.preventDefault(); this.submit(); });
-    on('[data-question-audio]', 'error', () => { this.root.querySelector('[data-audio-error]').textContent = 'Recording could not be played. Your browser may not support this OGG recording.'; });
-    this.root.querySelectorAll('[data-syllable]').forEach(input => input.addEventListener('change', () => this.choose(Number(input.dataset.syllable), input.value)));
-    this.root.querySelectorAll('[data-replay]').forEach(button => button.addEventListener('click', () => {
-      const audio = this.root.querySelector('[data-review-player]');
-      this.stopAudio();
-      if (audio) { audio.src = button.dataset.replay; audio.play().catch(() => {}); }
-    }));
-    this.cleanupReviewMedia = SyllablePitch.bindReviewMedia(this.root);
-  }
-
-  stopAudio() { this.root.querySelectorAll('audio').forEach(audio => audio.pause()); }
-
-  finish(status) {
-    if (this.finished) return;
-    this.finished = true;
-    this.finishStatus = status;
-    this.request?.abort();
-    clearTimeout(this.timer);
-    this.stopAudio();
-    this.options.onFinish?.(status);
-    this.render();
-  }
-
-  destroy() {
-    this.cleanupReviewMedia?.();
-    this.request?.abort();
-    clearTimeout(this.timer);
-    this.stopAudio();
-    if (this.state.started && !this.finished) {
-      this.finished = true;
-      this.options.onFinish?.('Interrupted');
-    }
-  }
 }

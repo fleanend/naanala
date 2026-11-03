@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 
+const lengthSource = await readFile(new URL('../web/tests/Exercise.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('../web/tests/VowelLength.js', import.meta.url), 'utf8');
+const lengthContrasts = runInNewContext(`${lengthSource}\nVowelLength.contrasts`, {});
 const source = await readFile(new URL('../web/tests/Tests.js', import.meta.url), 'utf8');
 function load(path, user) {
   const nodes = new Map();
@@ -12,7 +14,13 @@ function load(path, user) {
       node.dataset = { pitchProfile: profile };
       return node;
     });
-    if (selector === '[data-preference]') return ['pauseAfterCorrect', 'pauseAfterIncorrect', 'showPitchGraph', 'playAudioInline'].map(key => {
+    if (selector === '[data-length-contrast]') return Object.keys(lengthContrasts).map(key => {
+      const node = this.querySelector(`[data-length-contrast="${key}"]`);
+      node.dataset = { lengthContrast: key };
+      node.checked = root.innerHTML.includes(`data-length-contrast="${key}" checked`);
+      return node;
+    });
+    if (selector === '[data-preference]') return ['pauseAfterCorrect', 'pauseAfterIncorrect', 'showPitchGraph'].map(key => {
       const node = this.querySelector(`[data-preference="${key}"]`);
       node.dataset = { preference: key };
       return node;
@@ -30,8 +38,9 @@ function load(path, user) {
     start() { this.started = true; }
     destroy() {}
   }
+  class VowelLength extends SyllablePitch { static contrasts = lengthContrasts; }
   const instance = runInNewContext(`${source}\nnew Tests(root, context)`, {
-    root, context: { path, user, persist: () => { saved++; }, signIn() {} }, SyllablePitch
+    root, context: { path, user, persist: () => { saved++; }, signIn() {} }, SyllablePitch, SyllableNasality: SyllablePitch, Exercise: SyllablePitch, VowelLength
   });
   return { instance, root, saved: () => saved };
 }
@@ -66,7 +75,8 @@ test('start requires at least two pitch directions and one vowel category for al
     const valid = effective.some(profile => categories.slice(0, 3).includes(profile)) && effective.filter(profile => categories.slice(3).includes(profile)).length >= 2;
     assert.equal(app.root.querySelector('[data-start-session]').disabled, !valid, String(mask));
     app.root.querySelector('#session-count').value = '2';
-    app.root.querySelector('#session-settings').listeners.submit({ preventDefault() {} });
+    app.root.querySelector('#session-count').value = '3';
+  app.root.querySelector('#session-settings').listeners.submit({ preventDefault() {} });
     assert.equal(!!app.instance.session, valid, String(mask));
   }
   const app = load('/tests/syllable-pitch');
@@ -102,7 +112,7 @@ test('disabling flat turns off monophthongs, saves the result, and locks its che
 
 test('catalog groups linked exercise tiles by category', () => {
   const { root } = load('/tests');
-  assert.match(root.innerHTML, /<h2>Pitch<\/h2>/);
+  assert.match(root.innerHTML, /<h2>Vowels<\/h2>/);
   assert.match(root.innerHTML, /href="#\/tests\/syllable-pitch"/);
 });
 
@@ -206,4 +216,38 @@ test('history plots use recorded scores and activity and respond to status filte
   const empty = load('/tests/syllable-pitch/history', { testSessions: [] });
   assert.match(empty.root.querySelector('#test-history').innerHTML, /No tracked sessions/);
   assert.doesNotMatch(empty.root.querySelector('#test-history').innerHTML, /<svg/);
+});
+
+
+test('nasality setup starts independently of pitch filters and keeps its own history', () => {
+  const user = { exerciseSettings: { 'syllable-nasal': { profiles: [], mode: 'limited', count: 3 } } };
+  const app = load('/tests/syllable-nasal', user);
+  assert.match(app.root.innerHTML, /Syllable Nasality/);
+  assert.doesNotMatch(app.root.innerHTML, /data-pitch-profile|Show Pitch Graph/);
+  app.root.querySelector('#session-count').value = '3';
+  app.root.querySelector('#session-settings').listeners.submit({ preventDefault() {} });
+  assert.equal(app.instance.session.started, true);
+  assert.equal(app.instance.session.options.limit, 3);
+});
+
+
+test('vowel contrast settings persist, require a selection, and reach the exercise', () => {
+  const user = {};
+  const app = load('/tests/vowel-length', user);
+  assert.match(app.root.innerHTML, /Vowel contrasts/);
+  assert.doesNotMatch(app.root.innerHTML, /data-pitch-profile|Show Pitch Graph/);
+  for (const key of Object.keys(lengthContrasts)) {
+    const node = app.root.querySelector(`[data-length-contrast="${key}"]`);
+    node.checked = false;
+    node.listeners.change();
+  }
+  assert.equal(app.root.querySelector('[data-start-session]').disabled, true);
+  const node = app.root.querySelector('[data-length-contrast="diphthong_long_final"]');
+  node.checked = true; node.listeners.change();
+  assert.equal(app.root.querySelector('[data-start-session]').disabled, false);
+  const reopened = load('/tests/vowel-length', JSON.parse(JSON.stringify(user)));
+  assert.deepEqual(Array.from(reopened.instance.lengthContrasts), ['diphthong_long_final']);
+  reopened.root.querySelector('#session-count').value = '3';
+  reopened.root.querySelector('#session-settings').listeners.submit({ preventDefault() {} });
+  assert.deepEqual(Array.from(reopened.instance.session.options.contrasts), ['diphthong_long_final']);
 });

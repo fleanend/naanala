@@ -1,9 +1,20 @@
 // Add exercises here; the catalog groups them automatically by category.
 const exercises = [
-  { id: 'syllable-pitch', category: 'Pitch', name: 'Syllable Pitch',
+  { pitchSettings: true, id: 'syllable-pitch', category: 'Vowels', name: 'Syllable Pitch',
     description: 'Listen to a syllable and identify its pitch.',
     details: 'Listen to the recording and choose a pitch contour for each syllable. H means high and L means low. Check your answer to see which syllables were correct. The whole question counts as correct only when every syllable is correct. After answering, review can show the estimated pitch frequency in Hz and the expected pitch contours.',
-    create: (root, options) => new SyllablePitch(root, options) }
+    review: (answer, preferences) => SyllablePitch.review(answer, preferences),
+    create: (root, options) => new SyllablePitch(root, options) },
+  { id: 'syllable-nasal', category: 'Vowels', name: 'Syllable Nasality',
+    description: 'Listen to a syllable and identify whether it is nasal or oral.',
+    details: 'Listen to the recording and choose whether each syllable is nasal or oral. Check your answer to see which syllables were correct. The whole question counts as correct only when every syllable is correct. After answering, review can show the expected nasality of each syllable.',
+    review: (answer, preferences) => SyllableNasality.review(answer, preferences),
+    create: (root, options) => new SyllableNasality(root, options) },
+  { lengthSettings: true, id: 'vowel-length', category: 'Vowels', name: 'Vowel Length',
+    description: 'Distinguish short vowels, long vowels, and diphthongs.',
+    details: 'Choose between two spellings with the same consonants, tone, and nasality. Select any of four vowel contrasts below. Tone and nasality are disclosed for each tested syllable. Syllables that cannot preserve the same tone across both choices are not tested.',
+    review: (answer, preferences) => VowelLength.review(answer, preferences),
+    create: (root, options) => new VowelLength(root, options) }
 ];
 
 class Tests {
@@ -19,7 +30,7 @@ class Tests {
     this.user = user;
     this.persist = persist;
     this.signIn = signIn;
-    this.preferences = { pauseAfterCorrect: false, pauseAfterIncorrect: true, showPitchGraph: true, playAudioInline: true };
+    this.preferences = { pauseAfterCorrect: false, pauseAfterIncorrect: true, showPitchGraph: true };
     this.pitchProfiles = [...Tests.pitchProfiles];
     for (const key of Object.keys(this.preferences)) {
       if (typeof user?.testPreferences?.[key] === 'boolean') this.preferences[key] = user.testPreferences[key];
@@ -32,6 +43,11 @@ class Tests {
     const savedProfiles = user?.exerciseSettings?.[id]?.profiles;
     if (Array.isArray(savedProfiles) && savedProfiles.every(profile => Tests.pitchProfiles.includes(profile))) {
       this.pitchProfiles = Tests.pitchProfiles.filter(profile => savedProfiles.includes(profile));
+    }
+    this.lengthContrasts = Object.keys(this.exercise?.lengthSettings ? VowelLength.contrasts : {});
+    const savedContrasts = user?.exerciseSettings?.[id]?.contrasts;
+    if (this.exercise?.lengthSettings && Array.isArray(savedContrasts)) {
+      this.lengthContrasts = this.lengthContrasts.filter(key => savedContrasts.includes(key));
     }
     if (!id) this.catalog();
     else if (!this.exercise || (action && action !== 'history')) root.innerHTML = '<h1>Exercise not found</h1><a href="#/tests">Back to tests</a>';
@@ -80,21 +96,31 @@ class Tests {
         <label for="session-mode">Session length</label><select id="session-mode"><option value="limited">Limited</option><option value="unlimited">Unlimited</option></select>
         <div id="question-count"><label for="session-count">Number of questions</label><input id="session-count" type="number" min="1" max="1000" step="1" required value="${Number.isInteger(options.count) ? options.count : 20}"></div>
         <p id="session-description" aria-live="polite"></p>
-        <p>One question is one recording. Choose a contour for every syllable, then check your answer. All syllables must be right for the question to count as correct.</p>
+        <p>One question is one recording. Choose an answer for every syllable, then check your answer. All syllables must be right for the question to count as correct.</p>
       </form></section>
       <section class="preferences panel"><h2>Preferences</h2><p>General preferences saved to your ${this.user ? 'local account in this browser.' : 'current visit. Sign in to save them to your account.'}</p>
-      ${Object.entries({ pauseAfterCorrect: 'Pause After Correct Answers', pauseAfterIncorrect: 'Pause After Incorrect Answers', showPitchGraph: 'Show Pitch Graph During Review', playAudioInline: 'Play Audio Inline' }).map(([key, label]) => `<label class="checkbox"><input type="checkbox" data-preference="${key}" ${this.preferences[key] ? 'checked' : ''}>${label}</label>`).join('')}
+      ${Object.entries({ pauseAfterCorrect: 'Pause After Correct Answers', pauseAfterIncorrect: 'Pause After Incorrect Answers', ...(exercise.pitchSettings ? { showPitchGraph: 'Show Pitch Graph During Review' } : {}) }).map(([key, label]) => `<label class="checkbox"><input type="checkbox" data-preference="${key}" ${this.preferences[key] ? 'checked' : ''}>${label}</label>`).join('')}
       <p id="preference-status" role="status"></p></section>
-      <section class="test-settings panel"><h2>Test settings</h2><p>Vowel and pitch categories</p>
+      ${exercise.pitchSettings ? `<section class="test-settings panel"><h2>Test settings</h2><p>Vowel and pitch categories</p>
       ${Tests.pitchProfiles.map(profile => `<label class="checkbox"><input type="checkbox" data-pitch-profile="${profile}" ${this.pitchProfiles.includes(profile) ? 'checked' : ''}>${Tests.profileLabels[profile]}</label>`).join('')}
-      <p data-profile-status role="status"></p></section></div>
+      <p data-profile-status role="status"></p></section>` : ''}
+      ${exercise.lengthSettings ? `<section class="test-settings panel"><h2>Vowel contrasts</h2>
+      ${Object.entries(VowelLength.contrasts).map(([key, label]) => `<label class="checkbox"><input type="checkbox" data-length-contrast="${key}" ${this.lengthContrasts.includes(key) ? 'checked' : ''}>${this.text(label)}</label>`).join('')}
+      <p data-length-status role="status"></p></section>` : ''}</div>
       <div class="actions"><button data-start-session type="submit" form="session-settings" aria-describedby="category-validation">Start session</button></div>
       <p id="category-validation" role="status"></p>`;
     const query = selector => this.root.querySelector(selector);
-    const validCategories = () =>
+    const validCategories = () => exercise.lengthSettings ? this.lengthContrasts.length > 0 : !exercise.pitchSettings ||
       ['flat', 'rising', 'descending'].filter(profile => this.pitchProfiles.includes(profile)).length >= 2 &&
       ['monophthongs', 'diphthongs_long_vowels', 'triphthongs_diphthongs_with_long_vowels'].some(profile => this.pitchProfiles.includes(profile));
     const updateStart = () => {
+      if (exercise.lengthSettings) {
+        const valid = validCategories();
+        query('[data-start-session]').disabled = !valid;
+        query('#category-validation').textContent = valid ? '' : 'Select at least one vowel contrast.';
+        return;
+      }
+      if (!exercise.pitchSettings) return;
       const flatEnabled = this.pitchProfiles.includes('flat');
       if (!flatEnabled) this.pitchProfiles = this.pitchProfiles.filter(profile => profile !== 'monophthongs');
       const monophthongs = query('[data-pitch-profile="monophthongs"]');
@@ -105,6 +131,19 @@ class Tests {
       query('#category-validation').textContent = valid ? '' : 'Select at least one vowel category and at least two of Flat, Rising, and Descending.';
     };
     updateStart();
+    this.root.querySelectorAll('[data-length-contrast]').forEach(input => input.addEventListener('change', () => {
+      const selected = new Set(this.lengthContrasts);
+      if (input.checked) selected.add(input.dataset.lengthContrast);
+      else selected.delete(input.dataset.lengthContrast);
+      this.lengthContrasts = Object.keys(VowelLength.contrasts).filter(key => selected.has(key));
+      updateStart();
+      if (this.user) {
+        this.user.exerciseSettings ||= {};
+        this.user.exerciseSettings[exercise.id] = { ...options, ...this.user.exerciseSettings[exercise.id], contrasts: [...this.lengthContrasts] };
+        const saved = this.persist();
+        query('[data-length-status]').textContent = saved === false ? 'Storage unavailable; settings apply for this visit.' : 'Test settings saved.';
+      }
+    }));
     this.root.querySelectorAll('[data-pitch-profile]').forEach(input => input.addEventListener('change', () => {
       const selected = new Set(this.pitchProfiles);
       if (input.checked) selected.add(input.dataset.pitchProfile);
@@ -147,7 +186,7 @@ class Tests {
       const tracked = !!this.user && query('#tracking').value === 'tracked';
       if (this.user) {
         this.user.exerciseSettings ||= {};
-        this.user.exerciseSettings[exercise.id] = { tracked, mode, count: Number.isInteger(count) ? count : 20, profiles: [...this.pitchProfiles] };
+        this.user.exerciseSettings[exercise.id] = { tracked, mode, count: Number.isInteger(count) ? count : 20, profiles: [...this.pitchProfiles], ...(exercise.lengthSettings ? { contrasts: [...this.lengthContrasts] } : {}) };
         this.persist();
       }
       this.startSession({ tracked, limit: mode === 'limited' ? count : null });
@@ -162,7 +201,11 @@ class Tests {
       this.persist();
     }
     this.session = this.exercise.create(this.root, {
-      limit, tracked, profiles: [...this.pitchProfiles], preferences: { ...this.preferences },
+      limit, tracked, profiles: [...this.pitchProfiles], contrasts: [...this.lengthContrasts], preferences: { ...this.preferences },
+      onSessionReady: ({ limit }) => {
+        record.limit = limit;
+        if (tracked) this.persist();
+      },
       onProgress: ({ answered, correct, answer }) => {
         Object.assign(record, { answered, correct });
         if (answer) record.answers.push(answer);
@@ -240,7 +283,7 @@ class Tests {
         ${Array.isArray(item.answers) && item.answers.length ? `<h3>Category statistics</h3>${[...new Set(item.answers.map(answer => answer.type))].map(type => {
           const group = item.answers.filter(answer => answer.type === type);
           return `<p>${text(type)}: ${group.filter(answer => answer.correct).length} / ${group.length}</p>`;
-        }).join('')}<h3>Answer review</h3>${item.answers.map((answer, i) => `<details><summary>Question ${i + 1}: ${answer.correct ? 'Correct' : 'Incorrect'}</summary>${SyllablePitch.review(answer, this.preferences)}</details>`).join('')}` : '<p>Detailed answers were not recorded for this session.</p>'}
+        }).join('')}<h3>Answer review</h3>${item.answers.map((answer, i) => `<details><summary>Question ${i + 1}: ${answer.correct ? 'Correct' : 'Incorrect'}</summary>${this.exercise.review(answer, this.preferences)}</details>`).join('')}` : '<p>Detailed answers were not recorded for this session.</p>'}
       </details></td><td>${item.limit === null ? 'Unlimited' : text(item.limit)}</td><td>${text(item.correct)} / ${text(item.answered)}</td><td>${item.answered ? Math.round(item.correct / item.answered * 100) : 0}%</td><td>${duration(item)}</td><td>${text(item.status)}</td></tr>`).join('')}
       </tbody></table></div>${!filtered.length ? '<p>No matching sessions.</p>' : ''}
       <div class="actions"><button data-history-prev ${this.historyPage === 0 ? 'disabled' : ''}>Previous</button><span>Page ${this.historyPage + 1} of ${pages}</span><button data-history-next ${this.historyPage >= pages - 1 ? 'disabled' : ''}>Next</button></div><audio data-history-player hidden></audio>`}`;
@@ -256,7 +299,7 @@ class Tests {
       audio.src = button.dataset.replay;
       audio.play().catch(() => {});
     }));
-    this.cleanupReviewMedia = SyllablePitch.bindReviewMedia(this.root);
+    this.cleanupReviewMedia = Exercise.bindReviewMedia(this.root);
   }
 
   destroy() {
