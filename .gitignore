@@ -14,3 +14,7 @@ Resources/Temp
 .venv/
 __pycache__/
 *.pyc
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml

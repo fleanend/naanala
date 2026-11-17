@@ -1,0 +1,4 @@
+run-coverage = True
+cov-config-file = .coveragerc
+processes = 1
+verbose = 3

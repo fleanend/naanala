@@ -19,6 +19,31 @@ Interactive API docs are at http://localhost:3000/docs. Static hosting alone can
 
 Run `npm test` for frontend logic and a live Python API integration test (requires the installed Python dependencies).
 
+## Python tests and coverage
+
+Install the development dependencies and run Green from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m green tests
+```
+
+With the virtual environment activated, you can also run `green tests`. Green reads
+`.green` automatically and reports line and branch coverage for all Python files
+under `backend`, including files that were never imported. Missing line numbers
+appear in the terminal report. Plain `python -m unittest` does not enable this
+Green configuration.
+
+To generate a browsable report after running the tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m coverage html
+```
+
+Open `htmlcov/index.html` to inspect coverage per source line. Coverage output is
+ignored by Git. Placeholder tests that do not execute backend code report 0%
+coverage and may produce a "No data was collected" warning.
+
 ## Local profiles
 
 Choose **Sign in**, enter a display name, and continue. Returning with the same name restores that browser's profile and preferences. Sign out leaves the saved profile available for later. These profiles are a development substitute for authentication: anyone using this browser can select them, and they do not sync across devices. No passwords or remote authentication requests are used. Clearing browser storage removes the profiles.

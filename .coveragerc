@@ -1,0 +1,9 @@
+[run]
+source = backend
+branch = True
+
+[report]
+show_missing = True
+
+[html]
+directory = htmlcov
