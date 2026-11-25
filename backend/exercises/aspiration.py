@@ -43,7 +43,6 @@ for c in ALVEOLAR_LATERAL_AFFRICATES:
 
 
 onset = lambda syll: vowel_parts(syll)[0]
-notonset = lambda syll: "".join(vowel_parts(syll)[1]) + vowel_parts(syll)[2]
 
 def onset_enabled(onset: str, settings: AspirationSyllableSettings) -> bool:
     """
@@ -101,17 +100,23 @@ def make_aspiration_exercise(row: pd.Series, settings: AspirationSyllableSetting
             PitchSyllableExercise: A PitchSyllableExercise object.
     """
     syllables = row["syllables"]
-    profile = [syll if onset_enabled(onset(syll), settings) else "P" for syll in syllables]
-    options = [
-        [option + notonset(syll) for option in OPTIONS[onset(syll)] if onset_enabled(option, settings)]
-        if enabled != "P" else []
-        for syll, enabled in zip(syllables, profile)
-    ]
-    prompt = [
-        HIDE[onset(syll)] + notonset(syll)
-        if enabled != "P" else syll
-        for syll, enabled in zip(syllables, profile)
-    ]
+    profile, options, prompt = [], [], []
+    for syllable in syllables:
+        consonant = onset(syllable)
+        if not onset_enabled(consonant, settings):
+            profile.append("P")
+            options.append([])
+            prompt.append(syllable)
+            continue
+        # Replace only the onset to preserve the original vowel spelling.
+        suffix = syllable[len(consonant):]
+        profile.append(syllable)
+        options.append([
+            alternative + suffix
+            for alternative in OPTIONS[consonant]
+            if onset_enabled(alternative, settings)
+        ])
+        prompt.append(HIDE[consonant] + suffix)
 
     return AspirationExercise(
         example_id=str(row.name),

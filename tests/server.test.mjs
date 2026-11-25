@@ -234,6 +234,38 @@ test('Python backend serves exercises and recordings by ID with complete scoring
     assert.equal(lengthUI.state.history[0].correct, true);
     assert.match(root.innerHTML, /Correct vowel form:/);
     lengthUI.destroy();
+    const aspirationSource = await readFile(new URL('../web/tests/ConsonantAspiration.js', import.meta.url), 'utf8');
+    const Aspiration = runInNewContext(`${source}\n${aspirationSource}\nConsonantAspiration`, {});
+    const aspirationResponse = await fetch(base + Aspiration.endpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+    });
+    assert.equal(aspirationResponse.status, 200);
+    const aspirationBatch = await aspirationResponse.json();
+    assert.ok(aspirationBatch.exercises.some(item => item.aspiration_profile.includes('tó')));
+    aspirationBatch.exercises.forEach(item => Aspiration.validateExercise(item));
+    let aspirationStatus;
+    const aspirationUI = runInNewContext(`${source}\n${aspirationSource}\nnew ConsonantAspiration(root, options)`, {
+      root, options: {
+        limit: 1, aspirationCategories: ['alveolar_stop', 'unaspirated', 'aspirated'],
+        onFinish: value => { aspirationStatus = value; }
+      },
+      AbortController, fetch: (url, options) => fetch(base + url, options), setTimeout, clearTimeout
+    });
+    await aspirationUI.start();
+    assert.equal(aspirationUI.state.error, null);
+    const aspiration = aspirationUI.state.exercise;
+    assert.ok(aspiration.syllables_aspiration_prompt.some(prompt => prompt.startsWith('D')));
+    aspiration.aspiration_profile.forEach((choice, i) => {
+      if (choice === 'P') return;
+      assert.equal(aspiration.options_profile[i].length, 2);
+      assert.ok(aspiration.options_profile[i].every(option => /^[dt](?!ʼ)/.test(option)));
+      aspirationUI.choose(i, choice);
+    });
+    aspirationUI.submit();
+    assert.equal(aspirationStatus, 'Completed');
+    assert.equal(aspirationUI.state.history[0].correct, true);
+    assert.match(root.innerHTML, /Correct syllable:/);
+    aspirationUI.destroy();
     const head = await fetch(base, { method: 'HEAD' });
     assert.equal(head.status, 200);
     assert.equal(await head.text(), '');

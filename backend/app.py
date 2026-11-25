@@ -9,10 +9,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .dataset import load_dataset
+from .exercises.aspiration import eligible_aspiration_examples, make_aspiration_exercise
 from .exercises.nasality import eligible_nasality_examples, make_nasality_exercise
 from .exercises.pitch import eligible_pitch_examples, make_pitch_exercise
 from .exercises.vowel_length import make_length_exercise
 from .schemas import (
+    AspirationExercise,
+    AspirationSyllableSettings,
     NasalSyllableExercise,
     NasalSyllableSettings,
     PitchSyllableExercise,
@@ -66,7 +69,6 @@ def syllable_nasal_session(settings: NasalSyllableSettings, request: Request) ->
 
 @app.post("/api/tests/vowel-length/session", response_model=SyllableSession[VowelLengthExercise])
 def vowel_length_session(settings: VowelLengthSettings, request: Request) -> SyllableSession[VowelLengthExercise]:
-    # One row stays one example even when several syllables are eligible.
     exercises = [exercise for _, row in request.app.state.dataset.data.iterrows() if (exercise := make_length_exercise(row, settings, request.app.state.dataset.diphthongs)) is not None]
     if not exercises:
         raise HTTPException(status_code=503, detail="No recordings available for these vowel forms")
@@ -75,6 +77,16 @@ def vowel_length_session(settings: VowelLengthSettings, request: Request) -> Syl
     count = min(settings.question_count, available) if settings.question_count is not None else available
     return SyllableSession[VowelLengthExercise](exercises=exercises[:count], available_count=available)
 
+@app.post("/api/tests/aspiration/session", response_model=SyllableSession[AspirationExercise])
+def aspiration_session(settings: AspirationSyllableSettings, request: Request) -> SyllableSession[AspirationExercise]:
+    selected = eligible_aspiration_examples(request.app.state.dataset.data, settings)
+    if selected.empty:
+        raise HTTPException(status_code=503, detail="No recordings available for these settings")
+    count = min(settings.question_count, len(selected)) if settings.question_count is not None else len(selected)
+    return SyllableSession[AspirationExercise](
+        exercises=[make_aspiration_exercise(row, settings) for _, row in selected.sample(n=count).iterrows()],
+        available_count=len(selected),
+    )
 
 @app.get("/api/audio/{audio_id}")
 def recording(audio_id: str, request: Request) -> FileResponse:

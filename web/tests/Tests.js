@@ -14,7 +14,12 @@ const exercises = [
     description: 'Distinguish short vowels, long vowels, and diphthongs.',
     details: 'Choose the matching spelling from the enabled vowel forms. The choices keep the same consonants, tone contour, and nasality.',
     review: (answer, preferences) => VowelLength.review(answer, preferences),
-    create: (root, options) => new VowelLength(root, options) }
+    create: (root, options) => new VowelLength(root, options) },
+  { aspirationSettings: true, id: 'aspiration', category: 'Consonants', name: 'Consonant Aspiration',
+    description: 'Distinguish unaspirated, aspirated, and ejective consonants.',
+    details: 'Listen to the recording and choose which spelling matches the consonant at the start of each tested syllable.',
+    review: (answer, preferences) => ConsonantAspiration.review(answer, preferences),
+    create: (root, options) => new ConsonantAspiration(root, options) }
 ];
 
 class Tests {
@@ -48,6 +53,10 @@ class Tests {
     const savedForms = user?.exerciseSettings?.[id]?.vowelForms;
     if (this.exercise?.lengthSettings && Array.isArray(savedForms)) {
       this.lengthForms = this.lengthForms.filter(key => savedForms.includes(key));
+    }
+    if (this.exercise?.aspirationSettings) {
+      const saved = user?.exerciseSettings?.[id]?.aspirationCategories;
+      this.aspirationCategories = ConsonantAspiration.settingKeys.filter(key => !Array.isArray(saved) || saved.includes(key));
     }
     if (!id) this.catalog();
     else if (!this.exercise || (action && action !== 'history')) root.innerHTML = '<h1>Exercise not found</h1><a href="#/tests">Back to tests</a>';
@@ -96,7 +105,7 @@ class Tests {
         <label for="session-mode">Session length</label><select id="session-mode"><option value="limited">Limited</option><option value="unlimited">Unlimited</option></select>
         <div id="question-count"><label for="session-count">Number of questions</label><input id="session-count" type="number" min="1" max="1000" step="1" required value="${Number.isInteger(options.count) ? options.count : 20}"></div>
         <p id="session-description" aria-live="polite"></p>
-        <p>One question is one recording. Choose an answer for every syllable, then check your answer. All syllables must be right for the question to count as correct.</p>
+        <p>One question is one recording. Choose an answer for every tested syllable, then check your answer. All selected answers must be right for the question to count as correct.</p>
       </form></section>
       <section class="preferences panel"><h2>Preferences</h2><p>General preferences saved to your ${this.user ? 'local account in this browser.' : 'current visit. Sign in to save them to your account.'}</p>
       ${Object.entries({ pauseAfterCorrect: 'Pause After Correct Answers', pauseAfterIncorrect: 'Pause After Incorrect Answers', ...(exercise.pitchSettings ? { showPitchGraph: 'Show Pitch Graph During Review' } : {}) }).map(([key, label]) => `<label class="checkbox"><input type="checkbox" data-preference="${key}" ${this.preferences[key] ? 'checked' : ''}>${label}</label>`).join('')}
@@ -106,18 +115,31 @@ class Tests {
       <p data-profile-status role="status"></p></section>` : ''}
       ${exercise.lengthSettings ? `<section class="test-settings panel"><h2>Vowel forms</h2>
       ${Object.entries(VowelLength.vowelForms).map(([key, label]) => `<label class="checkbox"><input type="checkbox" data-length-form="${key}" ${this.lengthForms.includes(key) ? 'checked' : ''}>${this.text(label)}</label>`).join('')}
-      <p data-length-status role="status"></p></section>` : ''}</div>
+      <p data-length-status role="status"></p></section>` : ''}
+      ${exercise.aspirationSettings ? `<section class="test-settings panel"><h2>Test settings</h2>
+      ${Object.entries(ConsonantAspiration.settingGroups).map(([group, labels]) => `<fieldset><legend>${this.text(group)}</legend>
+      ${Object.entries(labels).map(([key, label]) => `<label class="checkbox"><input type="checkbox" data-aspiration-category="${key}" ${this.aspirationCategories.includes(key) ? 'checked' : ''}>${this.text(label)}</label>`).join('')}</fieldset>`).join('')}
+      <p data-aspiration-status role="status"></p></section>` : ''}</div>
       <div class="actions"><button data-start-session type="submit" form="session-settings" aria-describedby="category-validation">Start session</button></div>
       <p id="category-validation" role="status"></p>`;
     const query = selector => this.root.querySelector(selector);
-    const validCategories = () => exercise.lengthSettings ? this.lengthForms.length >= 2 : !exercise.pitchSettings ||
+    const validCategories = () => {
+      if (exercise.aspirationSettings) {
+        const { settingGroups } = ConsonantAspiration;
+        const enabled = group => Object.keys(settingGroups[group]).filter(key => this.aspirationCategories.includes(key)).length;
+        return enabled('Consonant groups') >= 1 && enabled('Aspiration types') >= 2;
+      }
+      return exercise.lengthSettings ? this.lengthForms.length >= 2 : !exercise.pitchSettings ||
       ['flat', 'rising', 'descending'].filter(profile => this.pitchProfiles.includes(profile)).length >= 2 &&
       ['monophthongs', 'diphthongs_long_vowels', 'triphthongs_diphthongs_with_long_vowels'].some(profile => this.pitchProfiles.includes(profile));
+    };
     const updateStart = () => {
-      if (exercise.lengthSettings) {
+      if (exercise.lengthSettings || exercise.aspirationSettings) {
         const valid = validCategories();
         query('[data-start-session]').disabled = !valid;
-        query('#category-validation').textContent = valid ? '' : 'Select at least two vowel forms.';
+        query('#category-validation').textContent = valid ? '' : exercise.aspirationSettings
+          ? 'Select at least one consonant group and two aspiration types.'
+          : 'Select at least two vowel forms.';
         return;
       }
       if (!exercise.pitchSettings) return;
@@ -131,6 +153,19 @@ class Tests {
       query('#category-validation').textContent = valid ? '' : 'Select at least one vowel category and at least two of Flat, Rising, and Descending.';
     };
     updateStart();
+    this.root.querySelectorAll('[data-aspiration-category]').forEach(input => input.addEventListener('change', () => {
+      const selected = new Set(this.aspirationCategories);
+      if (input.checked) selected.add(input.dataset.aspirationCategory);
+      else selected.delete(input.dataset.aspirationCategory);
+      this.aspirationCategories = ConsonantAspiration.settingKeys.filter(key => selected.has(key));
+      updateStart();
+      if (this.user) {
+        this.user.exerciseSettings ||= {};
+        this.user.exerciseSettings[exercise.id] = { ...options, ...this.user.exerciseSettings[exercise.id], aspirationCategories: [...this.aspirationCategories] };
+        const saved = this.persist();
+        query('[data-aspiration-status]').textContent = saved === false ? 'Storage unavailable; settings apply for this visit.' : 'Test settings saved.';
+      }
+    }));
     this.root.querySelectorAll('[data-length-form]').forEach(input => input.addEventListener('change', () => {
       const selected = new Set(this.lengthForms);
       if (input.checked) selected.add(input.dataset.lengthForm);
@@ -186,7 +221,11 @@ class Tests {
       const tracked = !!this.user && query('#tracking').value === 'tracked';
       if (this.user) {
         this.user.exerciseSettings ||= {};
-        this.user.exerciseSettings[exercise.id] = { tracked, mode, count: Number.isInteger(count) ? count : 20, profiles: [...this.pitchProfiles], ...(exercise.lengthSettings ? { vowelForms: [...this.lengthForms] } : {}) };
+        this.user.exerciseSettings[exercise.id] = {
+          tracked, mode, count: Number.isInteger(count) ? count : 20, profiles: [...this.pitchProfiles],
+          ...(exercise.lengthSettings ? { vowelForms: [...this.lengthForms] } : {}),
+          ...(exercise.aspirationSettings ? { aspirationCategories: [...this.aspirationCategories] } : {})
+        };
         this.persist();
       }
       this.startSession({ tracked, limit: mode === 'limited' ? count : null });
@@ -202,6 +241,7 @@ class Tests {
     }
     this.session = this.exercise.create(this.root, {
       limit, tracked, profiles: [...this.pitchProfiles], vowelForms: [...this.lengthForms], preferences: { ...this.preferences },
+      aspirationCategories: this.aspirationCategories,
       onSessionReady: ({ limit }) => {
         record.limit = limit;
         if (tracked) this.persist();

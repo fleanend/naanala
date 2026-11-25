@@ -48,8 +48,6 @@ from backend.schemas import (
     VowelLengthSettings,
 )
 
-# add options checking in make_x_exercise
-
 class TestVowelLength(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -82,7 +80,7 @@ class TestVowelLength(unittest.TestCase):
     def test_vowel_diphthongs(self):
         """Vowel diphthongs should return a sorted tuple of unique diphthongs found in the dataset."""
         # ao only present in triphthongs in the dataset (occurs in many words in reality e.g. naołnish), others don't occur in the language
-        self.assertEqual({'ai', 'ei', 'oi'}, set(vowel_diphthongs(self.data)))
+        self.assertEqual(vowel_diphthongs(self.data), ("ai", "ei", "oi"))
 
     def test_marked_nucleus(self):
         """marked_nucleus should return the correct marked vowel for given nucleus, tone, and nasalization."""
@@ -94,12 +92,14 @@ class TestVowelLength(unittest.TestCase):
         self.assertEqual(marked_nucleus("", "LH", False), "")
 
     def test_length_options(self):
+        """length_options should return the same four length options for each form of the same vowel nucleus."""
         settings = VowelLengthSettings()
         for syllable, tone in (("ta", "L"), ("taa", "LL"), ("tai", "LL"), ("taii", "LLL")):
             with self.subTest(syllable=syllable):
                 self.assertEqual(length_options(syllable, tone, "O", settings, ("ai", "ei")), ["ta", "taa", "tai", "taii"])
 
     def test_length_options_preserve_marks_and_consonants(self):
+        """length_options should preserve tone, nasalization, and consonants and skip syllables whose answer cannot be generated."""
         self.assertEqual(
             length_options("t\u0105\u0301h", "H", "N", VowelLengthSettings(), ("ai",)),
             ["t\u0105\u0301h", "t\u0105\u0301\u0105\u0301h", "t\u0105\u0301\u012f\u0301h", "t\u0105\u0301\u012f\u0301\u012f\u0301h"],
@@ -111,6 +111,7 @@ class TestVowelLength(unittest.TestCase):
         self.assertEqual(length_options("t\u00e1ii", "HLL", "O", VowelLengthSettings(), ("ai",)), [])
 
     def test_length_options_respect_enabled_forms(self):
+        """length_options should return only enabled forms and skip syllables without an enabled answer or enough options."""
         settings = VowelLengthSettings(long=False, diphthong=False)
         self.assertEqual(length_options("ta", "L", "O", settings, ("ai",)), ["ta", "taii"])
         self.assertEqual(length_options("taii", "LLL", "O", settings, ("ai",)), ["ta", "taii"])
@@ -119,6 +120,7 @@ class TestVowelLength(unittest.TestCase):
         self.assertEqual(length_options("ta", "L", "O", settings, ("ei",)), [])
 
     def test_length_options_reject_invalid_syllables_and_metadata(self):
+        """length_options should return no options for unsupported syllables or invalid tone and nasal profiles."""
         settings = VowelLengthSettings()
         for syllable, tone, nasal in (
             ("tst", "L", "O"), ("ta", "L", "T"), ("ta", "L", "N"),
@@ -129,13 +131,16 @@ class TestVowelLength(unittest.TestCase):
                 self.assertEqual(length_options(syllable, tone, nasal, settings, ("ai",)), [])
 
     def test_length_options_skip_syllabic_n(self):
+        """length_options should return no options for syllabic n."""
         self.assertEqual(length_options("n", "L", "O", VowelLengthSettings(), ("ai",)), [])
 
     def test_make_length_data_error(self):
+        """make_length_exercise should return None when the tone profile has fewer entries than the syllable list."""
         row = pd.Series({"syllables": ["ta", "taa"], "tone_profile": ["L"], "nasal_profile": ["O", "O"]})
         self.assertIsNone(make_length_exercise(row, VowelLengthSettings(), ("ai",)))
 
     def test_make_length_exercise(self):
+        """make_length_exercise should build prompts, answers, and options for enabled forms and return None when no syllable can be tested."""
         row = pd.Series({
             "word": "tataataitaii",
             "syllables": ["ta", "taa", "tai", "taii"],
@@ -162,13 +167,16 @@ class TestVowelLength(unittest.TestCase):
         """make_length_exercise should return a VowelLengthExercise object with the correct shapes for prompts, answers, originals, and options for each element in the dataset."""
         settings = VowelLengthSettings()
         diphthongs = ("ai", "ei", "oi")
+        checked_exercises = 0
         for _, row in self.data.iterrows():
             exercise = make_length_exercise(row, settings, diphthongs)
             if exercise is not None:
+                checked_exercises += 1
                 self.assertIsInstance(exercise, VowelLengthExercise)
                 self.assertEqual(len(exercise.syllables_length_prompt), len(exercise.length_profile))
                 self.assertEqual(len(exercise.syllables_length_prompt), len(exercise.original_length_profile))
                 self.assertEqual(len(exercise.syllables_length_prompt), len(exercise.options_profile))
+        self.assertGreater(checked_exercises, 0, "Expected at least one exercise from the dataset.")
 
 class TestPitch(unittest.TestCase):
     def __init__(self, *args, **kwargs):
@@ -380,6 +388,7 @@ class TestPitch(unittest.TestCase):
         self.assertFalse(exercise.options_profile[1])
 
     def test_make_pitch_exercise(self):
+        """make_pitch_exercise should build prompts, answers, and tone options according to the settings."""
         row = pd.Series({
             "word": "tataataitaii",
             "syllables": ["ta", "taa", "tai", "taii"],
@@ -414,13 +423,16 @@ class TestPitch(unittest.TestCase):
             rising=True,
             descending=True,
         )
+        checked_exercises = 0
         for _, row in self.data.iterrows():
             exercise = make_pitch_exercise(row, settings)
             if exercise is not None:
+                checked_exercises += 1
                 self.assertIsInstance(exercise, PitchSyllableExercise)
                 self.assertEqual(len(exercise.syllables_no_pitch), len(exercise.tone_profile))
                 self.assertEqual(len(exercise.syllables_no_pitch), len(exercise.original_tone_profile))
                 self.assertEqual(len(exercise.syllables_no_pitch), len(exercise.options_profile))
+        self.assertGreater(checked_exercises, 0, "Expected at least one exercise from the dataset.")
 
 class TestNasality(unittest.TestCase):
     def __init__(self, *args, **kwargs):
@@ -431,7 +443,7 @@ class TestNasality(unittest.TestCase):
         pass
 
     def test_eligible_nasality_examples(self):
-        """eligible_nasality_examples should filter out problematic examples and create a dataset seeded with negative samples"""
+        """eligible_nasality_examples should exclude words flagged for syllabic n and include a sample of oral words."""
         df_input = pd.DataFrame({
             "word" : ["tatan", "tatan", "tąta", "tątą", "tata"],
             "n_in_syllables" : [True, True, False, False, False],
@@ -448,6 +460,7 @@ class TestNasality(unittest.TestCase):
         pd.testing.assert_frame_equal(df_expected, df_output)
 
     def test_make_nasality_exercise(self):
+        """make_nasality_exercise should use denasalized prompts and offer both nasal and oral options for each syllable."""
         row = pd.Series({
             "word": "tątąątaitaii",
             "syllables": ["tą", "tąą", "tai", "taii"],
@@ -468,13 +481,16 @@ class TestNasality(unittest.TestCase):
         settings = NasalSyllableSettings(
             question_count=1
         )
+        checked_exercises = 0
         for _, row in self.data.iterrows():
             exercise = make_nasality_exercise(row, settings)
             if exercise is not None:
+                checked_exercises += 1
                 self.assertIsInstance(exercise, NasalSyllableExercise)
                 self.assertEqual(len(exercise.syllables_no_nasals), len(exercise.nasal_profile))
                 self.assertEqual(len(exercise.syllables_no_nasals), len(exercise.original_nasal_profile))
                 self.assertEqual(len(exercise.syllables_no_nasals), len(exercise.options_profile))
+        self.assertGreater(checked_exercises, 0, "Expected at least one exercise from the dataset.")
 
 class TestAspiration(unittest.TestCase):
     def __init__(self, *args, **kwargs):
@@ -672,7 +688,7 @@ class TestAspiration(unittest.TestCase):
 
     @mock.patch("backend.exercises.aspiration.onset_enabled", return_value=False)
     def test_make_aspiration_no_onset_enabled(self, mock_onset_enabled):
-        """make_aspiration_exercise should have no options if no tones are enabled."""
+        """make_aspiration_exercise should have no options if no onsets are enabled."""
         settings = AspirationSyllableSettings(
             question_count=1,
         )
@@ -686,6 +702,7 @@ class TestAspiration(unittest.TestCase):
         self.assertFalse(exercise.options_profile[1])
 
     def test_make_aspiration_exercise(self):
+        """make_aspiration_exercise should build prompts, answers, and onset options according to the settings."""
         row = pd.Series({
             "word": "takaatsʼaidaii",
             "syllables": ["ta", "kaa", "tsʼai", "daii"],
@@ -705,15 +722,24 @@ class TestAspiration(unittest.TestCase):
         self.assertEqual(exercise.aspiration_profile, ["P", "kaa", "P", "P"])
         self.assertEqual(list(map(sorted, exercise.options_profile)), [[], ['gaa', 'kaa', 'kʼaa'], [], []])
 
-    def make_aspiration_exercise_data(self):
-        """make_pitch_exercise should return a AspirationExercise object with the correct shape for prompts, answers, originals, options for each element of the dataset."""
+    def test_make_aspiration_exercise_data(self):
+        """make_aspiration_exercise should generate exercises whose prompts, answers, originals, and options align."""
         settings = AspirationSyllableSettings(
             question_count=1,
         )
+        checked_exercises = 0
         for _, row in self.data.iterrows():
             exercise = make_aspiration_exercise(row, settings)
             if exercise is not None:
+                checked_exercises += 1
                 self.assertIsInstance(exercise, AspirationExercise)
                 self.assertEqual(len(exercise.aspiration_profile), len(exercise.syllables_aspiration_prompt))
-                self.assertEqual(len(exercise.aspiration_profile), len(exercise.aspiration_profile))
+                self.assertEqual(len(exercise.aspiration_profile), len(exercise.original_aspiration_profile))
                 self.assertEqual(len(exercise.aspiration_profile), len(exercise.options_profile))
+                for answer, options in zip(exercise.aspiration_profile, exercise.options_profile):
+                    with self.subTest(word=exercise.word, answer=answer):
+                        if answer == "P":
+                            self.assertEqual(options, [])
+                        else:
+                            self.assertIn(answer, options)
+        self.assertGreater(checked_exercises, 0, "Expected at least one exercise from the dataset.")
