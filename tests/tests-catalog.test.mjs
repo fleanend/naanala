@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 
 const lengthSource = await readFile(new URL('../web/tests/Exercise.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('../web/tests/VowelLength.js', import.meta.url), 'utf8');
-const lengthContrasts = runInNewContext(`${lengthSource}\nVowelLength.contrasts`, {});
+const lengthForms = runInNewContext(`${lengthSource}\nVowelLength.vowelForms`, {});
 const source = await readFile(new URL('../web/tests/Tests.js', import.meta.url), 'utf8');
 function load(path, user) {
   const nodes = new Map();
@@ -14,10 +14,10 @@ function load(path, user) {
       node.dataset = { pitchProfile: profile };
       return node;
     });
-    if (selector === '[data-length-contrast]') return Object.keys(lengthContrasts).map(key => {
-      const node = this.querySelector(`[data-length-contrast="${key}"]`);
-      node.dataset = { lengthContrast: key };
-      node.checked = root.innerHTML.includes(`data-length-contrast="${key}" checked`);
+    if (selector === '[data-length-form]') return Object.keys(lengthForms).map(key => {
+      const node = this.querySelector(`[data-length-form="${key}"]`);
+      node.dataset = { lengthForm: key };
+      node.checked = root.innerHTML.includes(`data-length-form="${key}" checked`);
       return node;
     });
     if (selector === '[data-preference]') return ['pauseAfterCorrect', 'pauseAfterIncorrect', 'showPitchGraph'].map(key => {
@@ -38,7 +38,7 @@ function load(path, user) {
     start() { this.started = true; }
     destroy() {}
   }
-  class VowelLength extends SyllablePitch { static contrasts = lengthContrasts; }
+  class VowelLength extends SyllablePitch { static vowelForms = lengthForms; }
   const instance = runInNewContext(`${source}\nnew Tests(root, context)`, {
     root, context: { path, user, persist: () => { saved++; }, signIn() {} }, SyllablePitch, SyllableNasality: SyllablePitch, Exercise: SyllablePitch, VowelLength
   });
@@ -231,23 +231,27 @@ test('nasality setup starts independently of pitch filters and keeps its own his
 });
 
 
-test('vowel contrast settings persist, require a selection, and reach the exercise', () => {
+test('vowel form settings persist, require two forms, and reach the exercise', () => {
   const user = {};
   const app = load('/tests/vowel-length', user);
-  assert.match(app.root.innerHTML, /Vowel contrasts/);
+  assert.match(app.root.innerHTML, /Vowel forms/);
   assert.doesNotMatch(app.root.innerHTML, /data-pitch-profile|Show Pitch Graph/);
-  for (const key of Object.keys(lengthContrasts)) {
-    const node = app.root.querySelector(`[data-length-contrast="${key}"]`);
+  for (const key of Object.keys(lengthForms)) {
+    const node = app.root.querySelector(`[data-length-form="${key}"]`);
     node.checked = false;
     node.listeners.change();
   }
   assert.equal(app.root.querySelector('[data-start-session]').disabled, true);
-  const node = app.root.querySelector('[data-length-contrast="diphthong_long_final"]');
+  const node = app.root.querySelector('[data-length-form="long_diphthong"]');
   node.checked = true; node.listeners.change();
+  assert.equal(app.root.querySelector('[data-start-session]').disabled, true);
+  const short = app.root.querySelector('[data-length-form="short"]');
+  short.checked = true;
+  short.listeners.change();
   assert.equal(app.root.querySelector('[data-start-session]').disabled, false);
   const reopened = load('/tests/vowel-length', JSON.parse(JSON.stringify(user)));
-  assert.deepEqual(Array.from(reopened.instance.lengthContrasts), ['diphthong_long_final']);
+  assert.deepEqual(Array.from(reopened.instance.lengthForms), ['short', 'long_diphthong']);
   reopened.root.querySelector('#session-count').value = '3';
   reopened.root.querySelector('#session-settings').listeners.submit({ preventDefault() {} });
-  assert.deepEqual(Array.from(reopened.instance.session.options.contrasts), ['diphthong_long_final']);
+  assert.deepEqual(Array.from(reopened.instance.session.options.vowelForms), ['short', 'long_diphthong']);
 });

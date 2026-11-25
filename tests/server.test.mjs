@@ -153,7 +153,7 @@ test('Python backend serves exercises and recordings by ID with complete scoring
     nasalUI.destroy();
     const lengthSource = await readFile(new URL('../web/tests/VowelLength.js', import.meta.url), 'utf8');
     const Length = runInNewContext(`${source}\n${lengthSource}\nVowelLength`, {});
-    const contrastKeys = Object.keys(Length.contrasts);
+    const formKeys = Object.keys(Length.vowelForms);
     const lengthRequest = body => fetch(base + '/api/tests/vowel-length/session', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     });
@@ -168,41 +168,58 @@ test('Python backend serves exercises and recordings by ID with complete scoring
         oral: clusters.every(cluster => !cluster.includes('\u0328'))
       };
     };
-    for (const contrast of contrastKeys) {
-      const response = await lengthRequest(Object.fromEntries(contrastKeys.map(key => [key, key === contrast])));
-      assert.equal(response.status, 200, contrast);
+    const vowelForm = nucleus => {
+      if (nucleus.length === 1) return 'short';
+      if (nucleus.length === 3) return 'long_diphthong';
+      return nucleus[0] === nucleus[1] ? 'long' : 'diphthong';
+    };
+    const settingsFor = selected => Object.fromEntries(formKeys.map(key => [key, selected.includes(key)]));
+    for (const enabled of [formKeys, ['short', 'long'], ['short', 'long_diphthong'], ['diphthong', 'long_diphthong']]) {
+      const response = await lengthRequest(settingsFor(enabled));
+      assert.equal(response.status, 200, enabled.join(', '));
       const batch = await response.json();
-      assert.ok(batch.exercises.length > 0, contrast);
+      assert.ok(batch.exercises.length > 0);
       assert.equal(new Set(batch.exercises.map(item => item.example_id)).size, batch.exercises.length);
       let sawHigh = false, sawNasal = false;
+      const choicesByPromptAndTone = new Map();
       for (const item of batch.exercises) {
         Length.validateExercise(item);
         item.length_profile.forEach((answer, i) => {
-          if (answer === 'P') return;
-          assert.equal(item.contrast_profile[i], contrast);
+          if (answer === 'P') {
+            assert.deepEqual(item.options_profile[i], []);
+            return;
+          }
           const options = item.options_profile[i];
-          assert.equal(options.length, 2);
+          assert.ok(options.length >= 2);
           assert.ok(options.includes(answer));
-          const [a, b] = options.map(vowelInfo).sort((a, b) => a.nucleus.length - b.nucleus.length);
-          assert.equal(a.consonants, b.consonants);
-          assert.equal(a.tone, b.tone);
-          assert.equal(a.nasal, b.nasal);
-          assert.equal(a.oral, b.oral);
-          assert.ok(a.nasal || a.oral);
-          assert.equal(a.nucleus[0], b.nucleus[0]);
-          if (contrast === 'short_long') { assert.equal(a.nucleus.length, 1); assert.equal(b.nucleus, a.nucleus.repeat(2)); }
-          if (contrast === 'short_diphthong') { assert.equal(a.nucleus.length, 1); assert.equal(b.nucleus.length, 2); assert.notEqual(b.nucleus[0], b.nucleus[1]); }
-          if (contrast === 'long_diphthong') { assert.equal(a.nucleus.length, 2); assert.equal(b.nucleus.length, 2); assert.ok((a.nucleus[0] === a.nucleus[1]) !== (b.nucleus[0] === b.nucleus[1])); }
-          if (contrast === 'diphthong_long_final') { assert.equal(a.nucleus.length, 2); assert.notEqual(a.nucleus[0], a.nucleus[1]); assert.equal(b.nucleus, a.nucleus + a.nucleus[1]); }
-          assert.match(item.syllables_length_prompt[i], /\*/);
-          assert.doesNotMatch(item.syllables_length_prompt[i], /tone;|\[vowel\]/);
-          assert.equal(vowelInfo(item.syllables_length_prompt[i]).nucleus, a.nucleus[0]);
-          sawHigh ||= a.tone.includes('H'); sawNasal ||= a.nasal;
+          const actual = vowelInfo(answer);
+          const prompt = item.syllables_length_prompt[i];
+          assert.match(prompt, /\*/);
+          assert.equal(vowelInfo(prompt).nucleus, actual.nucleus[0]);
+          for (const option of options.map(vowelInfo)) {
+            assert.ok(enabled.includes(vowelForm(option.nucleus)));
+            assert.equal(option.consonants, actual.consonants);
+            assert.equal(option.tone, actual.tone);
+            assert.equal(option.nasal, actual.nasal);
+            assert.equal(option.oral, actual.oral);
+            assert.ok(option.nasal || option.oral);
+            assert.equal(option.nucleus[0], actual.nucleus[0]);
+          }
+          const key = JSON.stringify([prompt, actual.tone, actual.nasal]);
+          const sortedOptions = [...options].sort();
+          if (choicesByPromptAndTone.has(key)) assert.deepEqual(sortedOptions, choicesByPromptAndTone.get(key));
+          else choicesByPromptAndTone.set(key, sortedOptions);
+          sawHigh ||= actual.tone.includes('H'); sawNasal ||= actual.nasal;
         });
       }
-      if (contrast === 'short_long') { assert.ok(sawHigh); assert.ok(sawNasal); }
+      if (enabled.includes('short') && enabled.includes('long')) {
+        assert.ok(sawHigh);
+        assert.ok(sawNasal);
+      }
     }
-    assert.equal((await lengthRequest(Object.fromEntries(contrastKeys.map(key => [key, false])))).status, 503);
+    for (const enabled of [[], ...formKeys.map(key => [key])]) {
+      assert.equal((await lengthRequest(settingsFor(enabled))).status, 503);
+    }
     assert.equal((await lengthRequest({ question_count: 0 })).status, 422);
     let lengthStatus;
     const lengthUI = runInNewContext(`${source}\n${lengthSource}\nnew VowelLength(root, options)`, {

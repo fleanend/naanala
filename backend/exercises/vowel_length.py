@@ -1,4 +1,4 @@
-"""Vowel-length parsing, contrasts, and exercise generation."""
+"""Vowel-length parsing, options, and exercise generation."""
 
 import ast
 import random
@@ -8,7 +8,6 @@ from pathlib import Path
 import pandas as pd
 
 from ..schemas import VowelLengthExercise, VowelLengthSettings
-
 
 # Derive vowel choices from the spellings in this dataset, without guessing new diphthongs.
 def vowel_parts(syllable: str) -> tuple[str, list[str], str]:
@@ -81,60 +80,47 @@ def marked_nucleus(nucleus: str, tones: str, nasal: bool) -> str:
     ))
 
 
-def length_pairs(syllable: str, tone: str, nasal: str, settings: VowelLengthSettings, diphthongs: tuple[str, ...]) -> list[tuple[str, str]]:
-    """
-        Return eligible binary contrasts with identical tone and nasality on both options.
-        
-        Args:
-            syllable (str): The syllable to analyze.
-            tone (str): A string representing the tone(s) of the syllable.
-            nasal (str): A string indicating the nasality of the syllable ("O" for oral, "N" for nasal).
-            settings (VowelLengthSettings): The settings for vowel length exercises.
-            diphthongs (tuple[str, ...]): A tuple of diphthongs present in the dataset.
-
-        Returns:
-            list[tuple[str, str]]: A list of tuples, each containing the type of contrast and the alternate syllable.
-        """
+def length_options(syllable: str, tone: str, nasal: str, settings: VowelLengthSettings, diphthongs: tuple[str, ...]) -> list[str]:
+    """Build enabled spellings from the first vowel, tone contour, and nasality."""
     try:
-        parts = vowel_parts(syllable)
+        prefix, clusters, suffix = vowel_parts(syllable)
     except ValueError:
         return []
-    prefix, clusters, suffix = parts
-    nucleus = "".join(cluster[0].lower() for cluster in clusters)
-    if len(nucleus) != len(tone) or nasal not in ("O", "N"):
+    if len(clusters) != len(tone) or nasal not in ("O", "N") or set(tone) - {"H", "L"}:
         return []
-    # Do not invent a uniform nasality or tone when the source marks disagree.
     if any(("\u0328" in cluster) != (nasal == "N") for cluster in clusters):
         return []
     if any(("\u0301" in cluster) != (level == "H") for cluster, level in zip(clusters, tone)):
         return []
-    alternatives = []
-    def add(kind, other, other_tone):
-        if getattr(settings, kind):
-            alternatives.append((kind, unicodedata.normalize("NFC", prefix + marked_nucleus(other, other_tone, nasal == "N") + suffix)))
-    flat = len(set(tone)) == 1
-    dips = diphthongs
-    if len(nucleus) == 1:
-        add("short_long", nucleus * 2, tone * 2)
-        for dip in dips:
-            if dip[0] == nucleus:
-                add("short_diphthong", dip, tone * 2)
-    elif len(nucleus) == 2 and nucleus[0] == nucleus[1]:
-        if flat:
-            add("short_long", nucleus[0], tone[0])
-        for dip in dips:
-            if dip[0] == nucleus[0]:
-                add("long_diphthong", dip, tone)
-    elif nucleus in dips:
-        if flat:
-            add("short_diphthong", nucleus[0], tone[0])
-        add("long_diphthong", nucleus[0] * 2, tone)
-        add("diphthong_long_final", nucleus + nucleus[-1], tone + tone[-1])
-    elif len(nucleus) == 3 and nucleus[0] != nucleus[1] and nucleus[1] == nucleus[2] and nucleus[:2] in dips:  # noqa: SIM102
-        # Shortening the final vowel must not remove a tone transition.
-        if tone[1] == tone[2]:
-            add("diphthong_long_final", nucleus[:2], tone[:2])
-    return alternatives
+
+    first = clusters[0][0]
+    if first.lower() not in "aeiou":
+        return []
+    contour = "".join(level for i, level in enumerate(tone) if i == 0 or level != tone[i - 1])
+    # A short vowel cannot carry a transition. Keep that omission from
+    # giving away that the answer is one of the longer forms.
+    if len(contour) > 2 or (settings.short and len(contour) != 1):
+        return []
+    double_tone = contour if len(contour) == 2 else contour * 2
+    options = []
+
+    def add(nucleus: str, tones: str) -> None:
+        options.append(unicodedata.normalize("NFC", prefix + marked_nucleus(nucleus, tones, nasal == "N") + suffix))
+
+    if settings.short:
+        add(first, contour)
+    if settings.long:
+        add(first + first.lower(), double_tone)
+    for diphthong in diphthongs:
+        if diphthong[0] == first.lower():
+            dip = first + diphthong[1]
+            if settings.diphthong:
+                add(dip, double_tone)
+            if settings.long_diphthong:
+                add(dip + dip[-1], double_tone + double_tone[-1])
+
+    actual = unicodedata.normalize("NFC", syllable)
+    return options if len(options) >= 2 and actual in options else []
 
 
 def make_length_exercise(row: pd.Series, settings: VowelLengthSettings, diphthongs: tuple[str, ...]) -> VowelLengthExercise | None:
@@ -153,31 +139,27 @@ def make_length_exercise(row: pd.Series, settings: VowelLengthSettings, diphthon
     tones, nasals = row["tone_profile"], row["nasal_profile"]
     if not (len(syllables) == len(tones) == len(nasals)):
         return None
-    prompts, answers, originals, options, contrasts = [], [], [], [], []
+    prompts, answers, originals, options = [], [], [], []
     for syllable, tone, nasal in zip(syllables, tones, nasals):
         actual = unicodedata.normalize("NFC", syllable)
-        pairs = length_pairs(syllable, tone, nasal, settings, diphthongs)
+        choices = length_options(syllable, tone, nasal, settings, diphthongs)
         originals.append(actual)
-        if not pairs:
+        if not choices:
             prompts.append(actual + " (not tested)")
             answers.append("P")
             options.append([])
-            contrasts.append("")
             continue
-        kind, alternate = random.choice(pairs)
-        pair = [actual, alternate]
-        random.shuffle(pair)
+        random.shuffle(choices)
         parts = vowel_parts(syllable)
         # Keep the known first vowel (including its marks), hiding the remaining vowel form.
         prompts.append(unicodedata.normalize("NFC", parts[0] + parts[1][0] + "*" + parts[2]))
         answers.append(actual)
-        options.append(pair)
-        contrasts.append(kind)
+        options.append(choices)
     if all(answer == "P" for answer in answers):
         return None
     return VowelLengthExercise(
         example_id=str(row.name), syllables_length_prompt=prompts, length_profile=answers,
-        original_length_profile=originals, options_profile=options, contrast_profile=contrasts,
+        original_length_profile=originals, options_profile=options,
         word=row["word"], audio_id=Path(row["local_path"].replace("\\", "/")).stem,
     )
 

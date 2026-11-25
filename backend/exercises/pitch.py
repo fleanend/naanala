@@ -71,7 +71,7 @@ def eligible_pitch_examples(data: pd.DataFrame, settings: PitchSyllableSettings)
 
 def make_pitch_exercise(row: pd.Series, settings: PitchSyllableSettings) -> PitchSyllableExercise:
     """
-        Create a VowelLengthExercise from a dataset row.
+        Create a PitchSyllableExercise from a dataset row.
 
         Args:
             row (pd.Series): A row from the dataset containing word, tones and syllables with no tones.

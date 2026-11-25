@@ -12,7 +12,7 @@ const exercises = [
     create: (root, options) => new SyllableNasality(root, options) },
   { lengthSettings: true, id: 'vowel-length', category: 'Vowels', name: 'Vowel Length',
     description: 'Distinguish short vowels, long vowels, and diphthongs.',
-    details: 'Choose between two spellings with the same consonants, tone, and nasality. Select any of four vowel contrasts below. Tone and nasality are disclosed for each tested syllable. Syllables that cannot preserve the same tone across both choices are not tested.',
+    details: 'Choose the matching spelling from the enabled vowel forms. The choices keep the same consonants, tone contour, and nasality.',
     review: (answer, preferences) => VowelLength.review(answer, preferences),
     create: (root, options) => new VowelLength(root, options) }
 ];
@@ -44,10 +44,10 @@ class Tests {
     if (Array.isArray(savedProfiles) && savedProfiles.every(profile => Tests.pitchProfiles.includes(profile))) {
       this.pitchProfiles = Tests.pitchProfiles.filter(profile => savedProfiles.includes(profile));
     }
-    this.lengthContrasts = Object.keys(this.exercise?.lengthSettings ? VowelLength.contrasts : {});
-    const savedContrasts = user?.exerciseSettings?.[id]?.contrasts;
-    if (this.exercise?.lengthSettings && Array.isArray(savedContrasts)) {
-      this.lengthContrasts = this.lengthContrasts.filter(key => savedContrasts.includes(key));
+    this.lengthForms = Object.keys(this.exercise?.lengthSettings ? VowelLength.vowelForms : {});
+    const savedForms = user?.exerciseSettings?.[id]?.vowelForms;
+    if (this.exercise?.lengthSettings && Array.isArray(savedForms)) {
+      this.lengthForms = this.lengthForms.filter(key => savedForms.includes(key));
     }
     if (!id) this.catalog();
     else if (!this.exercise || (action && action !== 'history')) root.innerHTML = '<h1>Exercise not found</h1><a href="#/tests">Back to tests</a>';
@@ -104,20 +104,20 @@ class Tests {
       ${exercise.pitchSettings ? `<section class="test-settings panel"><h2>Test settings</h2><p>Vowel and pitch categories</p>
       ${Tests.pitchProfiles.map(profile => `<label class="checkbox"><input type="checkbox" data-pitch-profile="${profile}" ${this.pitchProfiles.includes(profile) ? 'checked' : ''}>${Tests.profileLabels[profile]}</label>`).join('')}
       <p data-profile-status role="status"></p></section>` : ''}
-      ${exercise.lengthSettings ? `<section class="test-settings panel"><h2>Vowel contrasts</h2>
-      ${Object.entries(VowelLength.contrasts).map(([key, label]) => `<label class="checkbox"><input type="checkbox" data-length-contrast="${key}" ${this.lengthContrasts.includes(key) ? 'checked' : ''}>${this.text(label)}</label>`).join('')}
+      ${exercise.lengthSettings ? `<section class="test-settings panel"><h2>Vowel forms</h2>
+      ${Object.entries(VowelLength.vowelForms).map(([key, label]) => `<label class="checkbox"><input type="checkbox" data-length-form="${key}" ${this.lengthForms.includes(key) ? 'checked' : ''}>${this.text(label)}</label>`).join('')}
       <p data-length-status role="status"></p></section>` : ''}</div>
       <div class="actions"><button data-start-session type="submit" form="session-settings" aria-describedby="category-validation">Start session</button></div>
       <p id="category-validation" role="status"></p>`;
     const query = selector => this.root.querySelector(selector);
-    const validCategories = () => exercise.lengthSettings ? this.lengthContrasts.length > 0 : !exercise.pitchSettings ||
+    const validCategories = () => exercise.lengthSettings ? this.lengthForms.length >= 2 : !exercise.pitchSettings ||
       ['flat', 'rising', 'descending'].filter(profile => this.pitchProfiles.includes(profile)).length >= 2 &&
       ['monophthongs', 'diphthongs_long_vowels', 'triphthongs_diphthongs_with_long_vowels'].some(profile => this.pitchProfiles.includes(profile));
     const updateStart = () => {
       if (exercise.lengthSettings) {
         const valid = validCategories();
         query('[data-start-session]').disabled = !valid;
-        query('#category-validation').textContent = valid ? '' : 'Select at least one vowel contrast.';
+        query('#category-validation').textContent = valid ? '' : 'Select at least two vowel forms.';
         return;
       }
       if (!exercise.pitchSettings) return;
@@ -131,15 +131,15 @@ class Tests {
       query('#category-validation').textContent = valid ? '' : 'Select at least one vowel category and at least two of Flat, Rising, and Descending.';
     };
     updateStart();
-    this.root.querySelectorAll('[data-length-contrast]').forEach(input => input.addEventListener('change', () => {
-      const selected = new Set(this.lengthContrasts);
-      if (input.checked) selected.add(input.dataset.lengthContrast);
-      else selected.delete(input.dataset.lengthContrast);
-      this.lengthContrasts = Object.keys(VowelLength.contrasts).filter(key => selected.has(key));
+    this.root.querySelectorAll('[data-length-form]').forEach(input => input.addEventListener('change', () => {
+      const selected = new Set(this.lengthForms);
+      if (input.checked) selected.add(input.dataset.lengthForm);
+      else selected.delete(input.dataset.lengthForm);
+      this.lengthForms = Object.keys(VowelLength.vowelForms).filter(key => selected.has(key));
       updateStart();
       if (this.user) {
         this.user.exerciseSettings ||= {};
-        this.user.exerciseSettings[exercise.id] = { ...options, ...this.user.exerciseSettings[exercise.id], contrasts: [...this.lengthContrasts] };
+        this.user.exerciseSettings[exercise.id] = { ...options, ...this.user.exerciseSettings[exercise.id], vowelForms: [...this.lengthForms] };
         const saved = this.persist();
         query('[data-length-status]').textContent = saved === false ? 'Storage unavailable; settings apply for this visit.' : 'Test settings saved.';
       }
@@ -186,7 +186,7 @@ class Tests {
       const tracked = !!this.user && query('#tracking').value === 'tracked';
       if (this.user) {
         this.user.exerciseSettings ||= {};
-        this.user.exerciseSettings[exercise.id] = { tracked, mode, count: Number.isInteger(count) ? count : 20, profiles: [...this.pitchProfiles], ...(exercise.lengthSettings ? { contrasts: [...this.lengthContrasts] } : {}) };
+        this.user.exerciseSettings[exercise.id] = { tracked, mode, count: Number.isInteger(count) ? count : 20, profiles: [...this.pitchProfiles], ...(exercise.lengthSettings ? { vowelForms: [...this.lengthForms] } : {}) };
         this.persist();
       }
       this.startSession({ tracked, limit: mode === 'limited' ? count : null });
@@ -201,7 +201,7 @@ class Tests {
       this.persist();
     }
     this.session = this.exercise.create(this.root, {
-      limit, tracked, profiles: [...this.pitchProfiles], contrasts: [...this.lengthContrasts], preferences: { ...this.preferences },
+      limit, tracked, profiles: [...this.pitchProfiles], vowelForms: [...this.lengthForms], preferences: { ...this.preferences },
       onSessionReady: ({ limit }) => {
         record.limit = limit;
         if (tracked) this.persist();

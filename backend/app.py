@@ -66,10 +66,10 @@ def syllable_nasal_session(settings: NasalSyllableSettings, request: Request) ->
 
 @app.post("/api/tests/vowel-length/session", response_model=SyllableSession[VowelLengthExercise])
 def vowel_length_session(settings: VowelLengthSettings, request: Request) -> SyllableSession[VowelLengthExercise]:
-    # One row stays one example even when several syllables or contrasts are eligible.
+    # One row stays one example even when several syllables are eligible.
     exercises = [exercise for _, row in request.app.state.dataset.data.iterrows() if (exercise := make_length_exercise(row, settings, request.app.state.dataset.diphthongs)) is not None]
     if not exercises:
-        raise HTTPException(status_code=503, detail="No recordings available for these contrasts")
+        raise HTTPException(status_code=503, detail="No recordings available for these vowel forms")
     available = len(exercises)
     random.shuffle(exercises)
     count = min(settings.question_count, available) if settings.question_count is not None else available
