@@ -1,43 +1,8 @@
-add meaning
-add line to kotu
-check all strings and cange english style 
-check deployment and CI/CD
+mock publish
+
 reinstate authentication
 reinstate old settings
 finish all tests
     - add other consonant distinction
     - add straight writing (needs keyboard)
-send to navajo guy
 
-{
-  "exercises": [
-    {
-      "example_id": "97",
-      "options_profile": [
-        [
-          "tsí",
-          "tsíí"
-        ],
-        [
-          "dii",
-          "di"
-        ]
-      ],
-      "word": "tsídii",
-      "audio_id": "9c4985833dc9a805a3ed",
-      "syllables_length_prompt": [
-        "tsí*",
-        "di*"
-      ],
-      "length_profile": [
-        "tsí",
-        "dii"
-      ],
-      "original_length_profile": [
-        "tsí",
-        "dii"
-      ]
-    }
-  ],
-  "available_count": 432
-}

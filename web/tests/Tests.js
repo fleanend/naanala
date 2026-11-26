@@ -65,13 +65,12 @@ class Tests {
   }
 
   catalog() {
-    this.root.innerHTML = `<p class="eyebrow">Practice by exercise</p><h1>Tests</h1>
-      <p>Choose an exercise, set up your session, and follow your progress.</p>
+    this.root.innerHTML = `<h1>Tests</h1>
       ${[...new Set(exercises.map(item => item.category))].map(category => `
         <section class="exercise-category"><h2>${this.text(category)}</h2><div class="exercise-grid">
         ${exercises.filter(item => item.category === category).map(item => `
-          <a class="exercise-tile" href="#/tests/${item.id}"><span class="eyebrow">${this.text(category)}</span>
-          <h3>${this.text(item.name)}</h3><p>${this.text(item.description)}</p><span>Set up session →</span></a>`).join('')}
+          <a class="exercise-tile" href="#/tests/${item.id}">
+          <h3>${this.text(item.name)}</h3><p>${this.text(item.description)}</p></a>`).join('')}
         </div></section>`).join('')}`;
   }
 
@@ -83,7 +82,7 @@ class Tests {
   }
 
   history() {
-    this.root.innerHTML = `${this.heading('history')}<h2 class="history-title">Session history</h2><p>Review your tracked sessions and how your results change over time.</p><section id="test-history"></section>`;
+    this.root.innerHTML = `${this.heading('history')}<h2 class="history-title">Session history</h2><section id="test-history"></section>`;
     this.renderHistory();
   }
 

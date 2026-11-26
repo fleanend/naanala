@@ -55,15 +55,13 @@ function render() {
   });
   document.title = `${({ home:'Learn Navajo', tests:'Tests', settings:'Settings', missing:'Page not found' })[page]} · Naanala`;
   if (page === 'home') {
-    main.innerHTML = `<p class="eyebrow">Your Navajo learning space</p>
-      <h1>A new language.<br>One step at a time.</h1>
-      <p class="intro">${user ? `Welcome, ${escape(user.name)}. ` : ''}Make room for Navajo in your day.</p>
-      <a class="button" href="#/tests">Go to tests <span aria-hidden="true">→</span></a>
-      <section class="card"><p class="eyebrow">A fresh start</p><h2>Room to grow</h2><p>Navajo learning material is coming. Your test workspace is ready for the first exercises.</p></section>`;
+    main.innerHTML = `<h1>One more tool to learn Navajo</h1>
+      <p>Practice Navajo pronunciation with listening exercises on pitch, nasality, vowel length, and consonant aspiration.</p>
+      <a class="button" href="#/tests">Browse tests</a>`;
   } else if (page === 'tests') {
     activeTest = new Tests(main, { path, user, persist, signIn: openLogin });
   } else if (page === 'settings') {
-    main.innerHTML = `<p class="eyebrow">Make yourself at home</p><h1>Settings</h1>${user ? `
+    main.innerHTML = `<h1>Settings</h1>${user ? `
       <form id="settings-form" class="settings">
         <label for="display-name">Display name</label><input id="display-name" required maxlength="60" value="${escape(user.name)}" autocomplete="nickname">
         <label for="theme">Appearance</label><select id="theme"><option value="system">Use device setting</option><option value="light">Light</option><option value="dark">Dark</option></select>

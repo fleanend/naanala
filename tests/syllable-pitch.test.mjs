@@ -12,7 +12,8 @@ test('disabled syllables stay visible but require no answer and do not affect sc
   const { ui, root } = create({ limit: 1 }, { fetch: async () => ({ ok: true, json: async () => batch(exercise) }) });
   await ui.start();
   assert.equal(ui.state.error, null);
-  assert.match(root.innerHTML, /Correct contour: L/);
+  assert.match(root.innerHTML, /Syllable 1: man/);
+  assert.doesNotMatch(root.innerHTML, /Correct contour:/);
   assert.doesNotMatch(root.innerHTML, /name="syllable-0"/);
   assert.match(root.innerHTML, /name="syllable-1"/);
   ui.choose(0, 'L');
@@ -25,6 +26,7 @@ test('disabled syllables stay visible but require no answer and do not affect sc
   assert.equal(ui.state.history[0].syllables[0].skipped, true);
   assert.equal(ui.state.history[0].syllables[0].expected, 'L');
   assert.match(root.innerHTML, /man: Skipped/);
+  assert.doesNotMatch(root.innerHTML, /Correct contour: L\b/);
   assert.doesNotMatch(root.innerHTML, /P pitch contour/);
   const validate = runInNewContext(`${source}\nSyllablePitch.validateExercise`, {});
   assert.throws(() => validate({ ...exercise, tone_profile: ['P', 'P'] }), /No enabled/);

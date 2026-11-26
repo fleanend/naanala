@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Your space to practice some Navajo features.">
+  <meta name="description" content="One more tool to learn Navajo. Practice pronunciation with listening exercises.">
   <title>Náánáłaʼ · Learn Navajo</title>
   <link rel="stylesheet" href="./style.css">
   <script src="./tests/Exercise.js" defer></script>
@@ -26,16 +26,19 @@
     <button id="account" class="secondary">Sign in</button>
   </header>
   <main id="main" tabindex="-1"></main>
-  <footer>A space for learning Navajo. One step at a time.</footer>
+  <footer>
+    <p class="footer-credits">Thank you to <a href="https://kotu.io/">Kotu</a> for the code this project builds on,
+      to <a href="https://en.wiktionary.org/wiki/Category:Navajo_language">Wiktionary</a> contributors for the dictionary data,
+      and to <a href="https://navajowotd.com/">Navajo Word of the Day</a> for the recordings.</p>
+  </footer>
   <dialog id="login">
     <form id="login-form">
-      <p class="eyebrow">Welcome</p>
-      <h2>Your learning space</h2>
-      <p>Create or return to a profile on this browser. No password needed.</p>
+      <h2>Sign in</h2>
+      <p>Enter a display name to open or create a profile in this browser. No password is required.</p>
       <label for="login-name">Display name</label>
       <input id="login-name" name="name" autocomplete="nickname" required maxlength="60">
       <p id="login-error" role="alert"></p>
-      <div class="actions"><button type="button" id="cancel-login" class="secondary">Cancel</button><button type="submit">Continue locally</button></div>
+      <div class="actions"><button type="button" id="cancel-login" class="secondary">Cancel</button><button type="submit">Continue</button></div>
     </form>
   </dialog>
   <p id="status" role="status" aria-live="polite"></p>
