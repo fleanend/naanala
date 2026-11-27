@@ -30,11 +30,12 @@ class Tests {
     triphthongs_diphthongs_with_long_vowels: 'Triphthongs / diphthongs with long vowels',
     flat: 'Flat', rising: 'Rising', descending: 'Descending'
   };
-  constructor(root, { path, user, persist, signIn }) {
+  constructor(root, { path, user, persist, signIn, savePreferences }) {
     this.root = root;
     this.user = user;
     this.persist = persist;
     this.signIn = signIn;
+    this.savePreferences = savePreferences;
     this.preferences = { pauseAfterCorrect: false, pauseAfterIncorrect: true, showPitchGraph: true };
     this.pitchProfiles = [...Tests.pitchProfiles];
     for (const key of Object.keys(this.preferences)) {
@@ -106,7 +107,7 @@ class Tests {
         <p id="session-description" aria-live="polite"></p>
         <p>One question is one recording. Choose an answer for every tested syllable, then check your answer. All selected answers must be right for the question to count as correct.</p>
       </form></section>
-      <section class="preferences panel"><h2>Preferences</h2><p>General preferences saved to your ${this.user ? 'local account in this browser.' : 'current visit. Sign in to save them to your account.'}</p>
+      <section class="preferences panel"><h2>Preferences</h2><p>${this.user ? 'These preferences follow your account.' : 'These preferences apply to your current visit. Sign in to save them to your account.'}</p>
       ${Object.entries({ pauseAfterCorrect: 'Pause After Correct Answers', pauseAfterIncorrect: 'Pause After Incorrect Answers', ...(exercise.pitchSettings ? { showPitchGraph: 'Show Pitch Graph During Review' } : {}) }).map(([key, label]) => `<label class="checkbox"><input type="checkbox" data-preference="${key}" ${this.preferences[key] ? 'checked' : ''}>${label}</label>`).join('')}
       <p id="preference-status" role="status"></p></section>
       ${exercise.pitchSettings ? `<section class="test-settings panel"><h2>Test settings</h2><p>Vowel and pitch categories</p>
@@ -191,12 +192,25 @@ class Tests {
         query('[data-profile-status]').textContent = saved === false ? 'Storage unavailable; settings apply for this visit.' : 'Test settings saved.';
       }
     }));
-    this.root.querySelectorAll('[data-preference]').forEach(input => input.addEventListener('change', () => {
-      this.preferences[input.dataset.preference] = input.checked;
+    this.root.querySelectorAll('[data-preference]').forEach(input => input.addEventListener('change', async () => {
+      const key = input.dataset.preference;
+      const value = input.checked;
+      this.preferences[key] = value;
       if (this.user) {
         this.user.testPreferences = { ...this.preferences };
+        const status = query('#preference-status');
         const saved = this.persist();
-        query('#preference-status').textContent = saved === false ? 'Storage unavailable; preferences apply for this visit.' : 'Preferences saved.';
+        if (this.savePreferences) {
+          status.textContent = 'Saving preferences…';
+          try {
+            await this.savePreferences({ [key]: value });
+            status.textContent = 'Preferences saved.';
+          } catch {
+            status.textContent = 'Could not sync this change. It applies to this visit.';
+          }
+        } else {
+          status.textContent = saved === false ? 'Storage unavailable; preferences apply for this visit.' : 'Preferences saved.';
+        }
       }
     }));
     query('#tracking').value = this.user && options.tracked ? 'tracked' : 'untracked';

@@ -23,7 +23,15 @@ async function load(saved, account) {
     localStorage: { getItem: () => stored, setItem: (_, value) => { stored = value; } },
     fetch: async (url, options) => {
       if (url === '/api/me') {
-        return account ? { ok: true, json: async () => account } : { ok: false, status: 401 };
+        return account ? { ok: true, json: async () => ({ ...account }) } : { ok: false, status: 401 };
+      }
+      if (url.startsWith('/api/me/settings')) {
+        assert.equal(options.method, 'PATCH');
+        assert.equal(options.headers['X-Account-ID'], account.id);
+        if (!url.endsWith('?initialize=true') || account.settings == null) {
+          account.settings = { ...account.settings, ...JSON.parse(options.body) };
+        }
+        return { ok: true, json: async () => account.settings };
       }
       assert.equal(url, '/api/auth/logout');
       assert.equal(options.method, 'POST');
@@ -39,19 +47,21 @@ async function load(saved, account) {
 test('authenticated accounts keep their theme and can save contrast without changing another profile', async () => {
   const account = { id: 'a', username: 'alice' };
   const app = await load({ activeId: 'b', profiles: [
-    { id: 'a', name: 'Alice', theme: 'dark' },
+    { id: 'a', name: 'Alice', theme: 'dark', testPreferences: { showPitchGraph: false } },
     { id: 'b', name: 'Bob', theme: 'light', prefersColorContrast: false }
   ] }, account);
   assert.equal(app.root.dataset.theme, 'dark');
   assert.equal(app.root.dataset.contrast, 'normal');
   app.node('#display-name').value = 'Alice';
   app.node('#color-contrast').checked = true;
-  app.node('#settings-form').listeners.submit({ preventDefault() {} });
+  await app.node('#settings-form').listeners.submit({ preventDefault() {} });
   assert.equal(app.root.dataset.contrast, 'high');
   assert.equal(app.saved().profiles[0].prefersColorContrast, true);
   assert.equal(app.saved().profiles[1].prefersColorContrast, false);
-  const reloaded = await load(app.saved(), account);
+  const reloaded = await load({ profiles: [] }, account);
+  assert.equal(reloaded.root.dataset.theme, 'dark');
   assert.equal(reloaded.root.dataset.contrast, 'high');
+  assert.equal(reloaded.saved().profiles[0].testPreferences.showPitchGraph, false);
   await reloaded.node('#account').listeners.click();
   assert.equal(reloaded.root.dataset.contrast, 'normal');
   assert.equal(reloaded.root.dataset.theme, 'system');

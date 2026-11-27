@@ -1,6 +1,6 @@
 # Naanala
 
-A Navajo learning site with a FastAPI backend, pronunciation exercises, and PostgreSQL accounts. Display preferences and practice history are saved in the browser.
+A Navajo learning site with a FastAPI backend, pronunciation exercises, and PostgreSQL accounts.
 
 ## Run locally
 
@@ -46,7 +46,7 @@ coverage and may produce a "No data was collected" warning.
 
 ## Accounts
 
-Choose **Sign in** to log in or create an account. FastAPI stores Argon2id password hashes and manages 14-day sessions using an HTTP-only cookie. Guests can still practice without tracking. Display preferences and tracked practice history are browser-local and keyed to the authenticated account ID. Profiles from the display-name-only version remain in browser storage and aren't automatically linked to a new account.
+Choose **Sign in** to log in or create an account. FastAPI stores Argon2id password hashes and manages 14-day sessions using an HTTP-only cookie. Display name, appearance, and shared exercise preferences follow your account. Existing browser preferences for that same account seed its settings on first sign-in after upgrading. Tracked practice history and per-exercise options stay in the browser. Guests can still practice without tracking.
 
 ## PostgreSQL for local development
 
@@ -79,7 +79,15 @@ guest-only mode.
 
 The SQL file initializes a fresh volume only. Changing `.env` after
 initialization requires rotating the corresponding database role passwords
-separately. Apply future schema changes as migrations. For a live deployment,
+separately. To upgrade an existing Compose database for account settings,
+run these commands before restarting FastAPI:
+
+```powershell
+docker compose up -d --wait db
+docker compose exec -T db psql -U postgres -d naanala -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/003-settings.sql
+```
+
+For a live deployment,
 schedule off-host backups and test restores. To create a full database dump
 inside the container and copy it to the host, run:
 
@@ -96,7 +104,7 @@ a new cluster also needs the `naanala_app` role for the saved grants.
 `render.yaml` defines a Free Python web service and a private Free
 PostgreSQL database. Render supplies the database's internal
 `DATABASE_URL` to FastAPI. At startup, FastAPI creates the auth schema and
-tables if they are missing. It waits up to 20 seconds for an initial
+its tables if they are missing. It waits up to 20 seconds for an initial
 connection and logs when the authentication database is ready. Render probes
 `/healthz` to check PostgreSQL connectivity before routing traffic to the new
 deploy and while it runs. Cookies on Render require HTTPS.

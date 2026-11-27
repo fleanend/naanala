@@ -58,14 +58,60 @@ function openLogin() {
   dialog.showModal();
   document.querySelector('#login-name').focus();
 }
-function useAccount(account) {
+const sharedPreferences = ['pauseAfterCorrect', 'pauseAfterIncorrect', 'showPitchGraph'];
+let settingsWrites = Promise.resolve();
+let savingForm = false;
+function applyAccountSettings(profile, username, settings) {
+  profile.name = settings.name ?? username;
+  profile.theme = settings.theme ?? 'system';
+  profile.prefersColorContrast = settings.prefersColorContrast ?? false;
+  profile.testPreferences = Object.fromEntries(
+    sharedPreferences.filter(key => typeof settings[key] === 'boolean').map(key => [key, settings[key]])
+  );
+}
+async function useAccount(account) {
   let profile = state.profiles.find(p => p.id === account.id);
   if (!profile) {
     profile = { id: account.id, name: account.username, theme: 'system' };
     state.profiles.push(profile);
-    persist();
+  } else if (account.settings == null && (
+    profile.name !== account.username || ['dark', 'light'].includes(profile.theme) ||
+    profile.prefersColorContrast === true || sharedPreferences.some(key => typeof profile.testPreferences?.[key] === 'boolean')
+  )) {
+    const saved = {
+      name: profile.name.trim().slice(0, 60) || account.username,
+      theme: ['system', 'light', 'dark'].includes(profile.theme) ? profile.theme : 'system',
+      prefersColorContrast: profile.prefersColorContrast === true
+    };
+    for (const key of sharedPreferences) {
+      if (typeof profile.testPreferences?.[key] === 'boolean') saved[key] = profile.testPreferences[key];
+    }
+    try {
+      account.settings = await requestSettings(account.id, saved, '?initialize=true');
+    } catch {
+      notify('Could not sync existing preferences. They are still available in this browser.');
+    }
   }
+  if (account.settings) applyAccountSettings(profile, account.username, account.settings);
   currentUser = profile;
+  persist();
+}
+async function requestSettings(accountId, changes, query = '') {
+  const response = await fetch('/api/me/settings' + query, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-Account-ID': accountId },
+    body: JSON.stringify(changes)
+  });
+  if (!response.ok) throw new Error('Settings could not be saved.');
+  return response.json();
+}
+function saveAccountSettings(user, changes) {
+  const save = settingsWrites.then(() => {
+    if (currentUser !== user) throw new Error('The account changed.');
+    return requestSettings(user.id, changes);
+  });
+  settingsWrites = save.catch(() => {});
+  return save;
 }
 function authRequest(path, body) {
   return fetch(path, {
@@ -95,7 +141,10 @@ function render() {
       <p>Practice Navajo pronunciation with listening exercises on pitch, nasality, vowel length, and consonant aspiration.</p>
       <a class="button" href="#/tests">Browse tests</a>`;
   } else if (page === 'tests') {
-    activeTest = new Tests(main, { path, user, persist, signIn: openLogin });
+    activeTest = new Tests(main, {
+      path, user, persist, signIn: openLogin,
+      savePreferences: changes => saveAccountSettings(user, changes)
+    });
   } else if (page === 'settings') {
     main.innerHTML = `<h1>Settings</h1>${user ? `
       <form id="settings-form" class="settings">
@@ -104,22 +153,34 @@ function render() {
         <label class="checkbox" for="color-contrast"><input id="color-contrast" type="checkbox" aria-describedby="contrast-help" ${user.prefersColorContrast === true ? 'checked' : ''}> Prefer Color Contrast</label>
         <p id="contrast-help">Use stronger text, borders, and focus indicators throughout the app in light or dark mode.</p>
         <div class="actions"><button type="submit">Save settings</button></div>
-        <p>Your profile and preferences are saved only in this browser.</p>
-      </form>` : '<p>Sign in to save your name and appearance preferences in this browser.</p><button id="settings-login">Sign in</button>'}`;
+        <p>Your name and appearance preferences follow your account.</p>
+      </form>` : '<p>Sign in to save your name and appearance preferences to your account.</p><button id="settings-login">Sign in</button>'}`;
     if (user) {
       document.querySelector('#theme').value = ['system','light','dark'].includes(user.theme) ? user.theme : 'system';
-      document.querySelector('#settings-form').addEventListener('submit', event => {
+      document.querySelector('#settings-form').addEventListener('submit', async event => {
         event.preventDefault();
+        if (savingForm) return;
         const input = document.querySelector('#display-name');
         const name = input.value.trim();
         input.setCustomValidity(name ? '' : 'Enter a display name.');
         if (!input.reportValidity()) return;
-        user.name = name;
-        user.theme = document.querySelector('#theme').value;
-        user.prefersColorContrast = document.querySelector('#color-contrast').checked;
-        const saved = persist();
-        render();
-        if (saved) notify('Settings saved.');
+        const changes = {
+          name,
+          theme: document.querySelector('#theme').value,
+          prefersColorContrast: document.querySelector('#color-contrast').checked
+        };
+        savingForm = true;
+        try {
+          await saveAccountSettings(user, changes);
+          Object.assign(user, changes);
+          persist();
+          if (currentUser === user && location.hash === '#/settings') render();
+          notify('Settings saved.');
+        } catch {
+          notify('Could not save settings. Try again.');
+        } finally {
+          savingForm = false;
+        }
       });
       document.querySelector('#display-name').addEventListener('input', event => event.target.setCustomValidity(''));
     } else document.querySelector('#settings-login').addEventListener('click', openLogin);
@@ -133,6 +194,7 @@ accountButton.addEventListener('click', async () => {
   authPending = true;
   accountButton.disabled = true;
   try {
+    await settingsWrites;
     const response = await authRequest('/api/auth/logout', {});
     if (!response.ok) throw new Error('Sign-out failed.');
     currentUser = null;
@@ -167,7 +229,7 @@ document.querySelector('#login-form').addEventListener('submit', async event => 
       error.textContent = typeof payload.detail === 'string' ? payload.detail : 'Could not continue. Try again.';
       return;
     }
-    useAccount(await response.json());
+    await useAccount(await response.json());
     document.querySelector('#login-form').reset();
     dialog.close();
   } catch {
@@ -183,7 +245,7 @@ if (recoveredSessions) persist();
 async function restoreAccount() {
   try {
     const response = await fetch('/api/me', { cache: 'no-store' });
-    if (response.ok) useAccount(await response.json());
+    if (response.ok) await useAccount(await response.json());
     else if (response.status !== 401) throw new Error('Account lookup failed.');
   } catch {
     notify('Could not check your sign-in. Try again.');

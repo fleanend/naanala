@@ -65,7 +65,7 @@ async def validation_error(request: Request, exc: RequestValidationError):
 @app.middleware("http")
 async def refresh_frontend_assets(request, call_next):
     response = await call_next(request)
-    if request.url.path in {"/api/me", "/healthz"} or request.url.path.startswith("/api/auth/"):
+    if request.url.path in {"/api/me", "/api/me/settings", "/healthz"} or request.url.path.startswith("/api/auth/"):
         response.headers["Cache-Control"] = "no-store"
     # Local development assets must not keep an old API contract in the browser.
     if request.url.path == "/" or request.url.path.endswith((".html", ".js", ".css")):

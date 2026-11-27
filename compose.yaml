@@ -12,6 +12,7 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ./database/001-auth.sql:/docker-entrypoint-initdb.d/001-auth.sql:ro
       - ./database/local-role.sql:/docker-entrypoint-initdb.d/002-local-role.sql:ro
+      - ./database/002-settings.sql:/docker-entrypoint-initdb.d/003-settings.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d naanala"]
       interval: 5s
