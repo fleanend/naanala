@@ -5,6 +5,7 @@ xcuserdata
 DerivedData/
 .DS_Store
 db.sqlite
+.env
 .swiftpm
 config.json
 node_modules
@@ -18,3 +19,4 @@ __pycache__/
 .coverage.*
 htmlcov/
 coverage.xml
+.env.example

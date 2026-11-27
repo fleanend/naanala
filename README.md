@@ -1,6 +1,6 @@
 # Naanala
 
-A Navajo learning site with a FastAPI backend, a syllable-pitch test using local OGG recordings and metadata, local profiles, and user settings (display name, light/dark/device appearance, and increased color contrast).
+A Navajo learning site with a FastAPI backend, pronunciation exercises, and PostgreSQL accounts. Display preferences and practice history are saved in the browser.
 
 ## Run locally
 
@@ -44,9 +44,85 @@ Open `htmlcov/index.html` to inspect coverage per source line. Coverage output i
 ignored by Git. Placeholder tests that do not execute backend code report 0%
 coverage and may produce a "No data was collected" warning.
 
-## Local profiles
+## Accounts
 
-Choose **Sign in**, enter a display name, and continue. Returning with the same name restores that browser's profile and preferences. Sign out leaves the saved profile available for later. These profiles are a development substitute for authentication: anyone using this browser can select them, and they do not sync across devices. No passwords or remote authentication requests are used. Clearing browser storage removes the profiles.
+Choose **Sign in** to log in or create an account. FastAPI stores Argon2id password hashes and manages 14-day sessions using an HTTP-only cookie. Guests can still practice without tracking. Display preferences and tracked practice history are browser-local and keyed to the authenticated account ID. Profiles from the display-name-only version remain in browser storage and aren't automatically linked to a new account.
+
+## PostgreSQL for local development
+
+Docker Compose runs PostgreSQL 17 on the same host as FastAPI. The database
+listens on host loopback, and a named volume preserves the data across container
+restarts and replacements. Without `DATABASE_URL`, local FastAPI runs in
+guest-only mode.
+
+1. Copy `.env.example` to `.env` and set two distinct, randomly generated
+   passwords. Use URL-safe characters for the app password, or URL-encode it
+   in the connection string. Change `NAANALA_DB_PORT` if port 5432 is in use.
+2. Run `docker compose up -d --wait db`.
+3. Verify that the app role can read the tables over TCP. The command prompts
+   for `NAANALA_DB_PASSWORD`.
+
+   ```sh
+   docker compose exec db psql -h 127.0.0.1 -U naanala_app -d naanala -W -c "SELECT count(*) FROM auth.accounts; SELECT count(*) FROM auth.sessions;"
+   ```
+
+4. Set `DATABASE_URL` in the shell that starts FastAPI. Replace
+   `APP_PASSWORD` and adjust the port if you changed it.
+
+   ```powershell
+   $env:DATABASE_URL = 'postgresql://naanala_app:APP_PASSWORD@127.0.0.1:5432/naanala'
+   npm.cmd start
+   ```
+
+   On macOS/Linux, run
+   `DATABASE_URL='postgresql://naanala_app:APP_PASSWORD@127.0.0.1:5432/naanala' npm start`.
+
+The SQL file initializes a fresh volume only. Changing `.env` after
+initialization requires rotating the corresponding database role passwords
+separately. Apply future schema changes as migrations. For a live deployment,
+schedule off-host backups and test restores. To create a full database dump
+inside the container and copy it to the host, run:
+
+```sh
+docker compose exec -T db pg_dump -U postgres -Fc -f /tmp/naanala.dump naanala
+docker compose cp db:/tmp/naanala.dump ./naanala.dump
+```
+
+Keep dumps outside the repository in protected backup storage. A restore into
+a new cluster also needs the `naanala_app` role for the saved grants.
+
+## Deploy on Render
+
+`render.yaml` defines a Free Python web service and a private Free
+PostgreSQL database. Render supplies the database's internal
+`DATABASE_URL` to FastAPI. At startup, FastAPI creates the auth schema and
+tables if they are missing. It waits up to 20 seconds for an initial
+connection and logs when the authentication database is ready. Render probes
+`/healthz` to check PostgreSQL connectivity before routing traffic to the new
+deploy and while it runs. Cookies on Render require HTTPS.
+
+1. If your existing Render service has a different name or region, update
+   the service name and set both regions in `render.yaml` to match before
+   pushing. The checked-in values are `naanala` and Oregon.
+2. Push to the branch connected to Render. In the Render Dashboard, select
+   **New → Blueprint** and connect the repository and branch. If the repo
+   already has a Blueprint, use that Blueprint to sync the update.
+3. Confirm that both resources show the Free plan in the preview, then apply
+   it. Later commits to the linked branch deploy automatically. Once the
+   deploy is live, register an account, reload, and verify that you stay
+   signed in.
+
+The web service can spin down while idle. The database persists separately
+and expires after 30 days. Render allows one active Free PostgreSQL database
+per workspace. If you already have one, connect the web service to it using
+the manual setup below. See [Render's Free tier limits](https://render.com/docs/free).
+
+If you manage the existing web service manually, select the Free plan for
+the web service and use a Free Render Postgres database in the same region.
+Set `DATABASE_URL` to its **Internal Database URL** in the web
+service's **Environment** tab, and use the build and start commands from
+`render.yaml`. Set **Health Check Path** to `/healthz` and enable Auto-Deploy
+under the web service's settings.
 
 ## Settings audit
 
@@ -70,7 +146,8 @@ These controls remain in the legacy reference and should return alongside their 
 
 ## Where to work
 
-- `web/app.js`: home page, `/tests` route, local profile handling, settings.
+- `web/app.js`: home page, `/tests` route, account UI, and browser-local settings.
+- `backend/auth.py`: PostgreSQL startup, account endpoints, and session handling.
 - `web/tests/SyllablePitch.js`: editable syllable-pitch test, adapted to plain JavaScript from the archived React component.
 - `web/tests/Tests.js`: exercise catalog, categories, setup, session tracking, and previous tests.
 - `web/style.css`: responsive layout and themes.

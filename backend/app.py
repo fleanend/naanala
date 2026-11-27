@@ -1,13 +1,17 @@
 """FastAPI wiring, HTTP routes, and frontend hosting."""
 
+import os
 import random
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .auth import check_database, open_database, router as auth_router
 from .dataset import load_dataset
 from .exercises.aspiration import eligible_aspiration_examples, make_aspiration_exercise
 from .exercises.nasality import eligible_nasality_examples, make_nasality_exercise
@@ -31,18 +35,50 @@ WEB = Path(__file__).resolve().parent.parent / "web"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.dataset = load_dataset()
-    yield
+    database_url = os.environ.get("DATABASE_URL")
+    app.state.secure_auth_cookie = os.environ.get("AUTH_SECURE_COOKIE") == "1"
+    if os.environ.get("RENDER") == "true":
+        if not database_url:
+            raise RuntimeError("DATABASE_URL must be configured on Render.")
+        app.state.secure_auth_cookie = True
+    pool = open_database(database_url) if database_url else None
+    app.state.auth_db = pool
+    try:
+        yield
+    finally:
+        if pool is not None:
+            pool.close()
 
 app = FastAPI(title="Naanala API", lifespan=lifespan)
+app.include_router(auth_router)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/api/auth/"):
+        return JSONResponse(
+            {"detail": "Enter a valid username and password."}, status_code=422,
+        )
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.middleware("http")
 async def refresh_frontend_assets(request, call_next):
     response = await call_next(request)
+    if request.url.path in {"/api/me", "/healthz"} or request.url.path.startswith("/api/auth/"):
+        response.headers["Cache-Control"] = "no-store"
     # Local development assets must not keep an old API contract in the browser.
     if request.url.path == "/" or request.url.path.endswith((".html", ".js", ".css")):
         response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.get("/healthz", include_in_schema=False)
+def health(request: Request):
+    pool = request.app.state.auth_db
+    if pool is not None and not check_database(pool):
+        raise HTTPException(503, "Authentication database is unavailable.")
+    return {"status": "ok"}
 
 
 @app.post("/api/tests/syllable-pitch/session", response_model=SyllableSession[PitchSyllableExercise])

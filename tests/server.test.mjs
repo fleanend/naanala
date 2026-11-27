@@ -29,9 +29,16 @@ test('Python backend serves exercises and recordings by ID with complete scoring
       if (path !== '/docs') assert.equal(response.headers.get('cache-control'), 'no-store', path);
       assert.ok((await response.text()).length > 0);
     }
-    for (const path of ['/reference/legacy/Package.swift', '/backend/app.py', '/requirements.txt', '/api/me', '/missing', '/%2e%2e/package.json', '/api/audio/dummy/unknown.wav']) {
+    for (const path of ['/reference/legacy/Package.swift', '/backend/app.py', '/requirements.txt', '/missing', '/%2e%2e/package.json', '/api/audio/dummy/unknown.wav']) {
       assert.equal((await fetch(base + path)).status, 404, path);
     }
+    const guest = await fetch(base + '/api/me');
+    assert.equal(guest.status, 401);
+    assert.equal(guest.headers.get('cache-control'), 'no-store');
+    const health = await fetch(base + '/healthz');
+    assert.equal(health.status, 200);
+    assert.equal(health.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await health.json(), { status: 'ok' });
     const exercise = (await (await fetch(base + '/api/tests/syllable-pitch/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_count: 1 }) })).json()).exercises[0];
     const frontendSource = await readFile(new URL('../web/tests/Exercise.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('../web/tests/SyllablePitch.js', import.meta.url), 'utf8');
     const validate = runInNewContext(`${frontendSource}\nSyllablePitch.validateExercise`, {});

@@ -1,11 +1,12 @@
 const storageKey = 'naanala.local.v1';
-const emptyState = () => ({ profiles: [], activeId: null });
+const emptyState = () => ({ profiles: [] });
 let state;
 try {
   state = JSON.parse(localStorage.getItem(storageKey)) || emptyState();
   if (!Array.isArray(state.profiles)) state = emptyState();
   state.profiles = state.profiles.filter(p => typeof p.id === 'string' && typeof p.name === 'string');
 } catch { state = emptyState(); }
+delete state.activeId;
 // An in-progress record loaded from storage belongs to a page that was closed or reloaded.
 let recoveredSessions = false;
 for (const profile of state.profiles) {
@@ -20,7 +21,11 @@ for (const profile of state.profiles) {
 
 const main = document.querySelector('main');
 const dialog = document.querySelector('#login');
-const currentUser = () => state.profiles.find(p => p.id === state.activeId);
+const accountButton = document.querySelector('#account');
+let currentUser = null;
+let accountReady = false;
+let authPending = false;
+let registering = false;
 const escape = text => String(text).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 let statusTimer;
 let activeTest;
@@ -33,20 +38,51 @@ function persist() {
   try { localStorage.setItem(storageKey, JSON.stringify(state)); return true; }
   catch { notify('Browser storage is unavailable. Changes will last for this session only.'); return false; }
 }
-function openLogin() {
+function setAuthMode(create) {
+  registering = create;
+  const title = create ? 'Create an account' : 'Sign in';
+  document.querySelector('#login-title').textContent = title;
+  document.querySelector('#submit-auth').textContent = title;
+  document.querySelector('#switch-auth').textContent = create ? 'Back to sign in' : 'Create an account';
+  const password = document.querySelector('#login-password');
+  password.autocomplete = create ? 'new-password' : 'current-password';
+  password.minLength = create ? 12 : 1;
+  password.value = '';
+  document.querySelector('#registration-help').hidden = !create;
   document.querySelector('#login-error').textContent = '';
+}
+function openLogin() {
+  if (!accountReady || authPending) return;
   document.querySelector('#login-form').reset();
+  setAuthMode(false);
   dialog.showModal();
   document.querySelector('#login-name').focus();
+}
+function useAccount(account) {
+  let profile = state.profiles.find(p => p.id === account.id);
+  if (!profile) {
+    profile = { id: account.id, name: account.username, theme: 'system' };
+    state.profiles.push(profile);
+    persist();
+  }
+  currentUser = profile;
+}
+function authRequest(path, body) {
+  return fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
 }
 function render() {
   activeTest?.destroy();
   activeTest = null;
-  const user = currentUser();
+  const user = currentUser;
   const theme = user?.theme;
   document.documentElement.dataset.theme = ['light','dark','system'].includes(theme) ? theme : 'system';
   document.documentElement.dataset.contrast = user?.prefersColorContrast === true ? 'high' : 'normal';
-  document.querySelector('#account').textContent = user ? 'Sign out' : 'Sign in';
+  accountButton.textContent = user ? 'Sign out' : 'Sign in';
+  accountButton.disabled = !accountReady || authPending;
   const path = location.hash.slice(1) || '/';
   const page = path === '/' ? 'home' : path === '/tests' || path.startsWith('/tests/') ? 'tests' : path === '/settings' ? 'settings' : 'missing';
   document.querySelectorAll('[data-page]').forEach(link => {
@@ -69,7 +105,7 @@ function render() {
         <p id="contrast-help">Use stronger text, borders, and focus indicators throughout the app in light or dark mode.</p>
         <div class="actions"><button type="submit">Save settings</button></div>
         <p>Your profile and preferences are saved only in this browser.</p>
-      </form>` : '<p>Sign in locally to save your name and appearance preferences.</p><button id="settings-login">Sign in</button>'}`;
+      </form>` : '<p>Sign in to save your name and appearance preferences in this browser.</p><button id="settings-login">Sign in</button>'}`;
     if (user) {
       document.querySelector('#theme').value = ['system','light','dark'].includes(user.theme) ? user.theme : 'system';
       document.querySelector('#settings-form').addEventListener('submit', event => {
@@ -91,28 +127,70 @@ function render() {
     main.innerHTML = '<h1>Page not found</h1><a href="#/">Return home</a>';
   }
 }
-document.querySelector('#account').addEventListener('click', () => {
-  if (!currentUser()) return openLogin();
-  state.activeId = null;
-  persist();
-  render();
+accountButton.addEventListener('click', async () => {
+  if (!currentUser) return openLogin();
+  if (authPending) return;
+  authPending = true;
+  accountButton.disabled = true;
+  try {
+    const response = await authRequest('/api/auth/logout', {});
+    if (!response.ok) throw new Error('Sign-out failed.');
+    currentUser = null;
+  } catch {
+    notify('Could not sign out. Try again.');
+  } finally {
+    authPending = false;
+    if (currentUser) accountButton.disabled = false;
+    else render();
+  }
 });
 document.querySelector('#cancel-login').addEventListener('click', () => dialog.close());
-document.querySelector('#login-form').addEventListener('submit', event => {
+document.querySelector('#switch-auth').addEventListener('click', () => setAuthMode(!registering));
+dialog.addEventListener('cancel', event => {
+  if (authPending) event.preventDefault();
+});
+document.querySelector('#login-form').addEventListener('submit', async event => {
   event.preventDefault();
-  const name = document.querySelector('#login-name').value.trim();
-  if (!name) { document.querySelector('#login-error').textContent = 'Enter a display name.'; return; }
-  let user = state.profiles.find(p => p.name.toLowerCase() === name.toLowerCase());
-  if (!user) {
-    user = { id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`, name, theme:'system' };
-    state.profiles.push(user);
+  if (authPending) return;
+  const error = document.querySelector('#login-error');
+  const controls = ['#submit-auth', '#switch-auth', '#cancel-login'].map(selector => document.querySelector(selector));
+  error.textContent = '';
+  authPending = true;
+  controls.forEach(control => { control.disabled = true; });
+  try {
+    const response = await authRequest(registering ? '/api/auth/register' : '/api/auth/login', {
+      username: document.querySelector('#login-name').value.trim(),
+      password: document.querySelector('#login-password').value
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      error.textContent = typeof payload.detail === 'string' ? payload.detail : 'Could not continue. Try again.';
+      return;
+    }
+    useAccount(await response.json());
+    document.querySelector('#login-form').reset();
+    dialog.close();
+  } catch {
+    error.textContent = 'Could not reach the sign-in service. Try again.';
+  } finally {
+    authPending = false;
+    controls.forEach(control => { control.disabled = false; });
+    if (currentUser) render();
   }
-  state.activeId = user.id;
-  persist();
-  dialog.close();
-  render();
 });
 window.addEventListener('hashchange', () => { render(); main.focus(); });
-// Device appearance is handled in CSS; avoid interrupting an active test on a theme change.
-render();
 if (recoveredSessions) persist();
+async function restoreAccount() {
+  try {
+    const response = await fetch('/api/me', { cache: 'no-store' });
+    if (response.ok) useAccount(await response.json());
+    else if (response.status !== 401) throw new Error('Account lookup failed.');
+  } catch {
+    notify('Could not check your sign-in. Try again.');
+  } finally {
+    accountReady = true;
+    render();
+  }
+}
+render();
+restoreAccount();
